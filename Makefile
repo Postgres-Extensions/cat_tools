@@ -10,8 +10,13 @@ LT93		 = $(call test, $(MAJORVER), -lt, 93)
 $B:
 	@mkdir -p $@
 
-versioned_in = $(wildcard sql/*--*--*.sql.in)
+versioned_in = $(wildcard sql/*--*.sql.in)
 versioned_out = $(subst sql/,$B/,$(subst .sql.in,.sql,$(versioned_in)))
+
+# Pre-built historical install scripts (no .sql.in source available)
+DATA += sql/cat_tools--0.1.0.sql sql/cat_tools--0.1.3.sql sql/cat_tools--0.1.4.sql
+# Generated historical install scripts (built from .sql.in source)
+DATA += $(versioned_out)
 
 all: $B/cat_tools.sql $(versioned_out)
 installcheck: $B/cat_tools.sql $(versioned_out)
