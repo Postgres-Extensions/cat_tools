@@ -1,3 +1,4 @@
+-- GENERATED FILE! DO NOT EDIT! See sql/cat_tools.in.sql
 DO $$
 BEGIN
   CREATE ROLE cat_tools__usage NOLOGIN;
@@ -22,7 +23,7 @@ BEGIN
 END
 $body$;
 
-@generated@
+-- GENERATED FILE! DO NOT EDIT! See sql/cat_tools.in.sql
 
 CREATE FUNCTION __cat_tools.create_function(
   function_name text
@@ -55,7 +56,7 @@ GRANT EXECUTE ON FUNCTION %s(
 $template$
   ;
 
-@generated@
+-- GENERATED FILE! DO NOT EDIT! See sql/cat_tools.in.sql
 
 BEGIN
   PERFORM __cat_tools.exec( format(
@@ -85,7 +86,7 @@ BEGIN
 END
 $body$;
 
-@generated@
+-- GENERATED FILE! DO NOT EDIT! See sql/cat_tools.in.sql
 
 CREATE SCHEMA cat_tools;
 GRANT USAGE ON SCHEMA cat_tools TO cat_tools__usage;
@@ -111,7 +112,7 @@ CREATE OR REPLACE VIEW cat_tools.pg_class_v AS
 ;
 GRANT SELECT ON cat_tools.pg_class_v TO cat_tools__usage;
 
-@generated@
+-- GENERATED FILE! DO NOT EDIT! See sql/cat_tools.in.sql
 
 CREATE OR REPLACE VIEW _cat_tools.pg_attribute_v AS
   SELECT a.*
@@ -149,7 +150,7 @@ CREATE OR REPLACE VIEW _cat_tools.column AS
 ;
 REVOKE ALL ON _cat_tools.column FROM public;
 
-@generated@
+-- GENERATED FILE! DO NOT EDIT! See sql/cat_tools.in.sql
 
 CREATE OR REPLACE VIEW cat_tools.column AS
   SELECT *
@@ -183,7 +184,7 @@ SELECT __cat_tools.create_function(
 $$
 );
 
-@generated@
+-- GENERATED FILE! DO NOT EDIT! See sql/cat_tools.in.sql
 
 -- Borrowed from newsysviews: http://pgfoundry.org/projects/newsysviews/
 SELECT __cat_tools.create_function(
@@ -204,7 +205,7 @@ SELECT __cat_tools.create_function(
 $$
 );
 
-@generated@
+-- GENERATED FILE! DO NOT EDIT! See sql/cat_tools.in.sql
 
 -- Borrowed from newsysviews: http://pgfoundry.org/projects/newsysviews/
 CREATE OR REPLACE VIEW cat_tools.pg_all_foreign_keys
@@ -225,7 +226,7 @@ AS
                                WHEN 'u' THEN 'NONE'
                                else null
          END AS match_type,
-         CASE k1.confdeltype WHEN 'a' THEN 'NO ACTION'  -- @generated@
+         CASE k1.confdeltype WHEN 'a' THEN 'NO ACTION'  -- -- GENERATED FILE! DO NOT EDIT! See sql/cat_tools.in.sql
                              WHEN 'c' THEN 'CASCADE'
                              WHEN 'd' THEN 'SET DEFAULT'
                              WHEN 'n' THEN 'SET NULL'
@@ -239,7 +240,7 @@ AS
                              WHEN 'r' THEN 'RESTRICT'
                              ELSE NULL
          END AS on_update,
-         k1.condeferrable AS is_deferrable,             -- @generated@
+         k1.condeferrable AS is_deferrable,             -- -- GENERATED FILE! DO NOT EDIT! See sql/cat_tools.in.sql
          k1.condeferred   AS is_deferred
     FROM pg_catalog.pg_constraint k1
     JOIN pg_catalog.pg_namespace n1 ON (n1.oid = k1.connamespace)
@@ -247,7 +248,7 @@ AS
     JOIN pg_catalog.pg_class c2     ON (c2.oid = k1.confrelid)
     JOIN pg_catalog.pg_namespace n2 ON (n2.oid = c2.relnamespace)
     JOIN pg_catalog.pg_depend d     ON (
-                 d.classid = 'pg_constraint'::regclass  -- @generated@
+                 d.classid = 'pg_constraint'::regclass  -- -- GENERATED FILE! DO NOT EDIT! See sql/cat_tools.in.sql
              AND d.objid = k1.oid
              AND d.objsubid = 0
              AND d.deptype = 'n'
@@ -256,14 +257,14 @@ AS
          )
     JOIN pg_catalog.pg_class ci ON (ci.oid = d.refobjid AND ci.relkind = 'i')
     LEFT JOIN pg_depend d2      ON (
-                 d2.classid = 'pg_class'::regclass      -- @generated@
+                 d2.classid = 'pg_class'::regclass      -- -- GENERATED FILE! DO NOT EDIT! See sql/cat_tools.in.sql
              AND d2.objid = ci.oid
              AND d2.objsubid = 0
              AND d2.deptype = 'i'
              AND d2.refclassid = 'pg_constraint'::regclass
              AND d2.refobjsubid = 0
          )
-    LEFT JOIN pg_catalog.pg_constraint k2 ON (          -- @generated@
+    LEFT JOIN pg_catalog.pg_constraint k2 ON (          -- -- GENERATED FILE! DO NOT EDIT! See sql/cat_tools.in.sql
                  k2.oid = d2.refobjid
              AND k2.contype IN ('p', 'u')
          )
@@ -274,7 +275,7 @@ AS
 ;
 GRANT SELECT ON cat_tools.pg_all_foreign_keys TO cat_tools__usage;
 
-@generated@
+-- GENERATED FILE! DO NOT EDIT! See sql/cat_tools.in.sql
 
 SELECT __cat_tools.create_function(
   'cat_tools.currval'
@@ -304,7 +305,7 @@ $body$
   , 'cat_tools__usage'
 );
 
-@generated@
+-- GENERATED FILE! DO NOT EDIT! See sql/cat_tools.in.sql
 
 SELECT __cat_tools.create_function(
   'cat_tools.enum_range'
@@ -321,7 +322,7 @@ $body$
   , 'cat_tools__usage'
 );
 
-@generated@
+-- GENERATED FILE! DO NOT EDIT! See sql/cat_tools.in.sql
 
 SELECT __cat_tools.create_function(
   'cat_tools.enum_range_srf'
@@ -343,7 +344,7 @@ $body$
   , 'cat_tools__usage'
 );
 
-@generated@
+-- GENERATED FILE! DO NOT EDIT! See sql/cat_tools.in.sql
 
 SELECT __cat_tools.create_function(
   'cat_tools.name__check'
@@ -359,7 +360,7 @@ $body$
   , 'cat_tools__usage'
 );
 
-@generated@
+-- GENERATED FILE! DO NOT EDIT! See sql/cat_tools.in.sql
 
 SELECT __cat_tools.create_function(
   'cat_tools.trigger__parse'
@@ -458,7 +459,7 @@ $body$
   , 'cat_tools__usage'
 );
 
-@generated@
+-- GENERATED FILE! DO NOT EDIT! See sql/cat_tools.in.sql
 
 SELECT __cat_tools.create_function(
   'cat_tools.trigger__get_oid__loose'
@@ -477,7 +478,7 @@ $body$
   , 'cat_tools__usage'
 );
 
-@generated@
+-- GENERATED FILE! DO NOT EDIT! See sql/cat_tools.in.sql
 
 SELECT __cat_tools.create_function(
   'cat_tools.trigger__get_oid'
@@ -503,7 +504,7 @@ $body$
   , 'cat_tools__usage'
 );
 
-@generated@
+-- GENERATED FILE! DO NOT EDIT! See sql/cat_tools.in.sql
 
 /*
  * Drop "temporary" objects
@@ -521,3 +522,4 @@ DROP FUNCTION __cat_tools.create_function(
 DROP SCHEMA __cat_tools;
 
 -- vi: expandtab ts=2 sw=2
+-- GENERATED FILE! DO NOT EDIT! See sql/cat_tools.in.sql
