@@ -25,3 +25,4 @@ regression.out
 # Misc
 tmp/
 .DS_Store
+.claude/*.local.json
