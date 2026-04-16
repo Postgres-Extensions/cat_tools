@@ -1356,16 +1356,16 @@ BEGIN
   RAISE DEBUG 'v_work "%"', v_work;
 
   -- Get function arguments
-  IF current_setting('server_version')::real >= 11.0 THEN
-    v_execute_clause := ' EXECUTE FUNCTION ' || r_trigger.tgfoid::pg_catalog.regproc || E'\\(';
-  ELSE
-    v_execute_clause := ' EXECUTE PROCEDURE ' || r_trigger.tgfoid::pg_catalog.regproc || E'\\(';
-  END IF;
+  -- PG11+ uses "EXECUTE FUNCTION"; older versions use "EXECUTE PROCEDURE".
+  -- Note: ::regproc returns the internal pg_temp_N schema name while pg_get_triggerdef
+  -- uses the pg_temp alias, so we match on EXECUTE PROCEDURE/FUNCTION + any non-space
+  -- chars (the function name) rather than the specific function name.
+  v_execute_clause := E' EXECUTE (?:PROCEDURE|FUNCTION) \\S+\\(';
   v_array := regexp_split_to_array( v_work, v_execute_clause );
-  EXECUTE format(
-      'SELECT array[ %s ]'
-      , rtrim( v_array[2], ')' ) -- Yank trailing )
-    )
+  EXECUTE CASE
+      WHEN trim(rtrim(v_array[2], ')')) = '' THEN 'SELECT ARRAY[]::text[]'
+      ELSE format('SELECT array[ %s ]', rtrim( v_array[2], ')' ))
+    END
     INTO function_arguments
   ;
   RAISE DEBUG 'v_array[2] "%"', v_array[2];

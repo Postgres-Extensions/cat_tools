@@ -14,4 +14,7 @@ CREATE ROLE :no_use_role;
 CREATE ROLE :use_role;
 
 GRANT cat_tools__usage TO :use_role;
+-- PG15+ removed CREATE on public schema from PUBLIC; grant it explicitly for tests
+-- that need to create shadow names in public to test catalog lookup correctness.
+GRANT CREATE ON SCHEMA public TO :use_role;
 
