@@ -3,6 +3,10 @@
 set -o errexit -o errtrace -o pipefail
 trap 'echo "Error on line ${LINENO}"' ERR
 
+# Source common library functions (error, die, debug)
+PGXNTOOL_DIR="$(dirname "${BASH_SOURCE[0]}")"
+source "$PGXNTOOL_DIR/lib.sh"
+
 [ -d .git ] || git init
 
 if ! git diff --cached --exit-code; then
@@ -35,21 +39,44 @@ safecp () {
     fi
 }
 
-safecp pgxntool/_.gitignore .gitignore
-safecp pgxntool/META.in.json META.in.json
+# =============================================================================
+# SETUP FILES
+# =============================================================================
+# SETUP_FILES and SETUP_SYMLINKS are defined in lib.sh
+# These are also used by update-setup-files.sh for sync updates.
+# =============================================================================
 
+# Copy tracked setup files (defined in lib.sh)
+for entry in "${SETUP_FILES[@]}"; do
+    src="pgxntool/${entry%%:*}"
+    dest="${entry##*:}"
+    # Create parent directory if needed
+    mkdir -p "$(dirname "$dest")"
+    safecp "$src" "$dest"
+done
+
+# Create tracked symlinks (defined in lib.sh)
+for entry in "${SETUP_SYMLINKS[@]}"; do
+    dest="${entry%%:*}"
+    target="${entry##*:}"
+    mkdir -p "$(dirname "$dest")"
+    if [ ! -e "$dest" ]; then
+        echo "Creating symlink $dest -> $target"
+        ln -s "$target" "$dest"
+        git add "$dest"
+    else
+        echo "$dest already exists"
+    fi
+done
+
+# META.in.json and Makefile are NOT in SETUP_FILES because users heavily customize them
+safecp pgxntool/META.in.json META.in.json
 safecreate Makefile include pgxntool/base.mk
 
 make META.json
 git add META.json
 
-mkdir -p sql test src
-
-cd test
-mkdir -p sql
-safecp ../pgxntool/test/deps.sql deps.sql
-[ -d pgxntool ] || ln -s ../pgxntool/test/pgxntool .
-git add pgxntool
+mkdir -p sql test/sql src
 git status
 
 echo "If you won't be creating C code then you can:
