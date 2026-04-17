@@ -1,0 +1,499 @@
+@generated@
+
+/*
+ * NOTE: All pg_temp objects must be dropped at the end of the script!
+ * Otherwise the eventual DROP CASCADE of pg_temp when the session ends will
+ * also drop the extension! Instead of risking problems, create our own
+ * "temporary" schema instead.
+ */
+CREATE SCHEMA __cat_tools;
+
+@generated@
+
+CREATE FUNCTION __cat_tools.exec(
+  sql text
+) RETURNS void LANGUAGE plpgsql AS $body$
+BEGIN
+  RAISE DEBUG 'sql = %', sql;
+  EXECUTE sql;
+END
+$body$;
+
+@generated@
+
+CREATE FUNCTION __cat_tools.create_function(
+  function_name text
+  , args text
+  , options text
+  , body text
+  , grants text DEFAULT NULL
+  , comment text DEFAULT NULL
+) RETURNS void LANGUAGE plpgsql AS $body$
+DECLARE
+  c_simple_args CONSTANT text := cat_tools.function__arg_types_text(args);
+
+  create_template CONSTANT text := $template$
+CREATE OR REPLACE FUNCTION %s(
+%s
+) RETURNS %s AS
+%L
+$template$
+  ;
+
+  revoke_template CONSTANT text := $template$
+REVOKE ALL ON FUNCTION %s(
+%s
+) FROM public;
+$template$
+  ;
+
+  grant_template CONSTANT text := $template$
+GRANT EXECUTE ON FUNCTION %s(
+%s
+) TO %s;
+$template$
+  ;
+
+  comment_template CONSTANT text := $template$
+COMMENT ON FUNCTION %s(
+%s
+) IS %L;
+$template$
+  ;
+
+@generated@
+
+BEGIN
+  PERFORM __cat_tools.exec( format(
+      create_template
+      , function_name
+      , args
+      , options -- TODO: Force search_path if options ~* 'definer'
+      , body
+    ) )
+  ;
+  PERFORM __cat_tools.exec( format(
+      revoke_template
+      , function_name
+      , c_simple_args
+    ) )
+  ;
+
+  IF grants IS NOT NULL THEN
+    PERFORM __cat_tools.exec( format(
+        grant_template
+        , function_name
+        , c_simple_args
+        , grants
+      ) )
+    ;
+  END IF;
+
+  IF comment IS NOT NULL THEN
+    PERFORM __cat_tools.exec( format(
+        comment_template
+        , function_name
+        , c_simple_args
+        , comment
+      ) )
+    ;
+  END IF;
+END
+$body$;
+
+@generated@
+
+/*
+ * UPGRADE STARTS HERE
+ */
+
+-- No perms on extension visibility
+CREATE OR REPLACE VIEW cat_tools.pg_extension_v AS
+  SELECT e.oid, e.*
+
+      , extnamespace::regnamespace AS extschema -- SED: REQUIRES 9.5!
+      , nspname AS extschema -- SED: PRIOR TO 9.5!
+
+      , extconfig::pg_catalog.regclass[] AS ext_config_tables
+    FROM pg_catalog.pg_extension e
+      LEFT JOIN pg_catalog.pg_namespace n ON n.oid = e.extnamespace
+;
+GRANT SELECT ON cat_tools.pg_extension_v TO cat_tools__usage;
+
+@generated@
+
+SELECT __cat_tools.create_function(
+  'cat_tools.pg_extension__get'
+  , 'extension_name name'
+  , $$cat_tools.pg_extension_v LANGUAGE plpgsql$$
+  , $body$
+DECLARE
+  r cat_tools.pg_extension_v;
+BEGIN
+  SELECT INTO STRICT r
+      *
+    FROM cat_tools.pg_extension_v
+    WHERE extname = extension_name
+  ;
+  RETURN r;
+EXCEPTION WHEN no_data_found THEN
+  RAISE 'extension "%" does not exist', extension_name
+    USING ERRCODE = 'undefined_object'
+  ;
+END
+$body$
+  , 'cat_tools__usage'
+);
+SELECT __cat_tools.create_function(
+  'cat_tools.extension__schemas'
+  , 'extension_names name[]'
+  , $$pg_catalog.regnamespace[] LANGUAGE sql$$ -- SED: REQUIRES 9.5!
+  , $$pg_catalog.name[] LANGUAGE sql$$ -- SED: PRIOR TO 9.5!
+  , $body$
+SELECT array(
+  SELECT (cat_tools.pg_extension__get(en)).extschema
+    FROM unnest(extension_names) en
+)
+$body$
+  , 'cat_tools__usage'
+);
+SELECT __cat_tools.create_function(
+  'cat_tools.extension__schemas_unique'
+  , 'extension_names name[]'
+  , $$pg_catalog.regnamespace[] LANGUAGE sql$$ -- SED: REQUIRES 9.5!
+  , $$pg_catalog.name[] LANGUAGE sql$$ -- SED: PRIOR TO 9.5!
+  , $body$
+SELECT array(
+  SELECT DISTINCT (cat_tools.pg_extension__get(en)).extschema
+    FROM unnest(extension_names) en
+)
+$body$
+  , 'cat_tools__usage'
+);
+
+@generated@
+
+-- Text versions
+SELECT __cat_tools.create_function(
+  'cat_tools.extension__schemas'
+  , 'extension_names text'
+  , $$pg_catalog.regnamespace[] LANGUAGE sql$$ -- SED: REQUIRES 9.5!
+  , $$pg_catalog.name[] LANGUAGE sql$$ -- SED: PRIOR TO 9.5!
+  , $body$
+SELECT cat_tools.extension__schemas(
+  CASE WHEN extension_names LIKE '{%}' THEN extension_names
+  ELSE '{' || extension_names || '}'
+  END::name[]
+)
+$body$
+  , 'cat_tools__usage'
+);
+SELECT __cat_tools.create_function(
+  'cat_tools.extension__schemas_unique'
+  , 'extension_names text'
+  , $$pg_catalog.regnamespace[] LANGUAGE sql$$ -- SED: REQUIRES 9.5!
+  , $$pg_catalog.name[] LANGUAGE sql$$ -- SED: PRIOR TO 9.5!
+  , $body$
+SELECT cat_tools.extension__schemas_unique(
+  CASE WHEN extension_names LIKE '{%}' THEN extension_names
+  ELSE '{' || extension_names || '}'
+  END::name[]
+)
+$body$
+  , 'cat_tools__usage'
+);
+
+@generated@
+
+-- trigger__get_oid__loose: smarter tgname matching (strip surrounding quotes if present)
+SELECT __cat_tools.create_function(
+  'cat_tools.trigger__get_oid__loose'
+  , $$
+  trigger_table pg_catalog.regclass
+  , trigger_name text
+$$
+  , $$oid LANGUAGE sql$$
+  , $body$
+  SELECT oid
+    FROM pg_trigger
+    WHERE tgrelid = $1 --trigger_table
+      AND tgname = CASE
+        /*
+         * tgname isn't quoted, so strip quotes, but only if the string both
+         * starts and ends with quotes
+         */
+        WHEN $2 LIKE '"%"' THEN btrim($2, '"')
+        ELSE $2
+        END --trigger_name
+  ;
+$body$
+  , 'cat_tools__usage'
+  , 'Return the OID for a trigger. Returns NULL if trigger does not exist.'
+);
+
+@generated@
+
+-- trigger__get_oid: add proper errcode to exception
+SELECT __cat_tools.create_function(
+  'cat_tools.trigger__get_oid'
+  , $$
+  trigger_table pg_catalog.regclass
+  , trigger_name text
+$$
+  , $$oid LANGUAGE plpgsql$$
+  , $body$
+DECLARE
+  v_oid oid;
+BEGIN
+  -- Note that because __loose isn't an SRF it'll always return a value
+  v_oid := cat_tools.trigger__get_oid__loose( trigger_table, trigger_name ) ;
+
+  IF v_oid IS NULL THEN
+    RAISE EXCEPTION 'trigger % on table % does not exist', trigger_name, trigger_table
+      USING errcode = 'undefined_object' -- 42704
+    ;
+  END IF;
+
+  RETURN v_oid;
+END
+$body$
+  , 'cat_tools__usage'
+  , 'Return the OID for a trigger. Throws an undefined_object error if the trigger does not exist.'
+);
+
+@generated@
+
+-- trigger__parse(oid) signature changed: added trigger_table and trigger_function OUT
+-- params; function_arguments changed from text to text[]. Must DROP before recreating.
+DROP FUNCTION cat_tools.trigger__parse(oid);
+
+SELECT __cat_tools.create_function(
+  'cat_tools.trigger__parse'
+  , $$
+  trigger_oid oid
+  , OUT trigger_table regclass
+  , OUT timing text
+  , OUT events text[]
+  , OUT defer text
+  , OUT row_statement text
+  , OUT when_clause text
+  , OUT trigger_function regprocedure
+  , OUT function_arguments text[]
+$$
+  , $$record STABLE LANGUAGE plpgsql$$
+  , $body$
+DECLARE
+  r_trigger pg_catalog.pg_trigger;
+  v_triggerdef text;
+  v_create_stanza text;
+  v_on_clause text;
+  v_execute_clause text;
+
+  v_work text;
+  v_array text[];
+BEGIN
+  /*
+   * Do this first to make sure trigger exists.
+   *
+   * TODO: After we no longer support < 9.6, test v_triggerdef for NULL instead
+   * using the extra block here.
+   */
+  BEGIN
+    SELECT * INTO STRICT r_trigger FROM pg_catalog.pg_trigger WHERE oid = trigger_oid;
+  EXCEPTION WHEN no_data_found THEN
+    RAISE EXCEPTION 'trigger with OID % does not exist', trigger_oid
+      USING errcode = 'undefined_object' -- 42704
+    ;
+  END;
+  trigger_table := r_trigger.tgrelid;
+  trigger_function := r_trigger.tgfoid;
+
+  v_triggerdef := pg_catalog.pg_get_triggerdef(trigger_oid, true);
+
+  v_create_stanza := format(
+    'CREATE %sTRIGGER %I '
+    , CASE WHEN r_trigger.tgconstraint=0 THEN '' ELSE 'CONSTRAINT ' END
+    , r_trigger.tgname
+  );
+  -- Strip CREATE [CONSTRAINT] TRIGGER ... off
+  v_work := replace( v_triggerdef, v_create_stanza, '' );
+
+  -- Get BEFORE | AFTER | INSTEAD OF
+  timing := split_part( v_work, ' ', 1 );
+  timing := timing || CASE timing WHEN 'INSTEAD' THEN ' OF' ELSE '' END;
+
+  -- Strip off timing clause
+  v_work := replace( v_work, timing || ' ', '' );
+
+  -- Get array of events (INSERT, UPDATE [OF column, column], DELETE, TRUNCATE)
+  v_on_clause := ' ON ' || r_trigger.tgrelid::pg_catalog.regclass || ' ';
+  v_array := regexp_split_to_array( v_work, v_on_clause );
+  events := string_to_array( v_array[1], ' OR ' );
+  -- Get everything after ON table_name
+  v_work := v_array[2];
+  RAISE DEBUG 'v_work "%"', v_work;
+
+  -- Strip off FROM referenced_table if we have it
+  IF r_trigger.tgconstrrelid<>0 THEN
+    v_work := replace(
+      v_work
+      , 'FROM ' || r_trigger.tgconstrrelid::pg_catalog.regclass || ' '
+      , ''
+    );
+  END IF;
+  RAISE DEBUG 'v_work "%"', v_work;
+
+  -- Get function arguments
+  v_execute_clause := ' EXECUTE PROCEDURE ' || r_trigger.tgfoid::pg_catalog.regproc || E'\\(';
+  v_array := regexp_split_to_array( v_work, v_execute_clause );
+  EXECUTE format(
+      'SELECT array[ %s ]'
+      , rtrim( v_array[2], ')' ) -- Yank trailing )
+    )
+    INTO function_arguments
+  ;
+  RAISE DEBUG 'v_array[2] "%"', v_array[2];
+  -- Get everything prior to EXECUTE PROCEDURE ...
+  v_work := v_array[1];
+  RAISE DEBUG 'v_work "%"', v_work;
+
+  row_statement := (regexp_matches( v_work, 'FOR EACH (ROW|STATEMENT)' ))[1];
+
+  -- Get [ NOT DEFERRABLE | [ DEFERRABLE ] { INITIALLY IMMEDIATE | INITIALLY DEFERRED } ]
+  v_array := regexp_split_to_array( v_work, 'FOR EACH (ROW|STATEMENT)' );
+  RAISE DEBUG 'v_work = "%", v_array = "%"', v_work, v_array;
+  defer := rtrim(v_array[1]);
+
+  IF r_trigger.tgqual IS NOT NULL THEN
+    when_clause := rtrim(
+      (regexp_split_to_array( v_array[2], E' WHEN \\(' ))[2]
+      , ')'
+    );
+  END IF;
+
+  RAISE DEBUG
+$$v_create_stanza = "%"
+  v_on_clause = "%"
+  v_execute_clause = "%"$$
+    , v_create_stanza
+    , v_on_clause
+    , v_execute_clause
+  ;
+
+  RETURN;
+END
+$body$
+  , 'cat_tools__usage'
+  , 'Provide details about a trigger.'
+);
+
+@generated@
+
+SELECT __cat_tools.create_function(
+  'cat_tools.trigger__parse'
+  , $$
+  trigger_table pg_catalog.regclass
+  , trigger_name text
+  , OUT timing text
+  , OUT events text[]
+  , OUT defer text
+  , OUT row_statement text
+  , OUT when_clause text
+  , OUT trigger_function regprocedure
+  , OUT function_arguments text[]
+$$
+  , $$record STABLE LANGUAGE sql$$
+  -- s/, OUT \(\w*\).*/  , \1/
+  , $body$
+SELECT
+    timing
+    , events
+    , "defer"
+    , row_statement
+    , when_clause
+    , trigger_function
+    , function_arguments
+  FROM cat_tools.trigger__parse(
+    cat_tools.trigger__get_oid(trigger_table, trigger_name)
+  )
+$body$
+  , 'cat_tools__usage'
+  , 'Provide details about a trigger.'
+);
+
+@generated@
+
+SELECT __cat_tools.create_function(
+  'cat_tools.trigger__args_as_text'
+  , $$function_arguments text[]$$
+  , $$text IMMUTABLE STRICT LANGUAGE sql$$
+  , $body$
+  SELECT format(
+    $$'%s'$$
+    , array_to_string(
+      function_arguments
+      , $$', '$$
+    )
+  )
+$body$
+  , 'cat_tools__usage'
+  , 'Convert function_arguments as returned by trigger__parse() to text (for backwards compatibility).'
+);
+
+@generated@
+
+-- Fix hint URL in error message
+SELECT __cat_tools.create_function(
+  'cat_tools.object__reg_type_catalog'
+  , 'object_identifier_type regtype'
+  , 'pg_catalog.regclass LANGUAGE plpgsql SECURITY DEFINER STRICT IMMUTABLE'
+  , $body$
+DECLARE
+  cat pg_catalog.regclass;
+BEGIN
+  SELECT INTO STRICT cat
+      object_catalog
+    FROM _cat_tools.catalog_metadata m
+    WHERE m.reg_type = object_identifier_type
+      OR m.simple_reg_type = object_identifier_type
+  ;
+  RETURN cat;
+EXCEPTION WHEN no_data_found THEN
+  IF object_identifier_type::text LIKE 'reg%' THEN
+    RAISE 'object identifier type % is not supported', object_identifier_type
+      USING
+        HINT = format( 'If %I is a valid object identifier type please open an issue at https://github.com/decibel/cat_tools/issues.', object_identifier_type )
+        , ERRCODE = 'feature_not_supported'
+    ;
+  ELSE
+    RAISE '% is not a object identifier type', object_identifier_type
+      USING
+        HINT = 'See https://www.postgresql.org/docs/current/static/datatype-oid.html'
+        , ERRCODE = 'wrong_object_type'
+    ;
+  END IF;
+END
+$body$
+  , 'cat_tools__usage'
+  , 'Returns the system catalog that stores a particular object identifier type.'
+);
+
+@generated@
+
+/*
+ * Drop "temporary" objects
+ */
+DROP FUNCTION __cat_tools.exec(
+  sql text
+);
+DROP FUNCTION __cat_tools.create_function(
+  function_name text
+  , args text
+  , options text
+  , body text
+  , grants text
+  , comment text
+);
+DROP SCHEMA __cat_tools;
+
+-- vi: expandtab ts=2 sw=2
