@@ -22,6 +22,37 @@ DATA += $(filter-out $(EXTENSION_VERSION_FILES), $(versioned_out))
 all: $B/cat_tools.sql $(versioned_out)
 installcheck: $B/cat_tools.sql $(versioned_out)
 EXTRA_CLEAN += $B/cat_tools.sql $(filter-out $(EXTENSION_VERSION_FILES), $(versioned_out))
+# Also clean the generated .sql.in for the current version
+EXTRA_CLEAN += $(EXTENSION_VERSION_FILES:.sql=.sql.in)
+
+# Temporary ugly hack for 9.x — remove these two blocks when 9.x support is dropped.
+# $@ is deferred via = and expands to the target name at recipe time.
+ifeq ($(LT95),yes)
+_sql_sed_95 = pgxntool/safesed $@.tmp -E -e 's/(.*)-- SED: REQUIRES 9\.5!/-- Requires 9.5: \1/'
+else
+_sql_sed_95 = pgxntool/safesed $@.tmp -E -e 's/(.*)-- SED: PRIOR TO 9\.5!/-- Not used prior to 9.5: \1/'
+endif
+ifeq ($(LT93),yes)
+_sql_sed_93 = pgxntool/safesed $@.tmp -E -e 's/(.*)-- SED: REQUIRES 9\.3!/-- Requires 9.3: \1/'
+else
+_sql_sed_93 = pgxntool/safesed $@.tmp -E -e 's/(.*)-- SED: PRIOR TO 9\.3!/-- Not used prior to 9.3: \1/'
+endif
+
+# Apply all version-conditional SED markers to $@.tmp.
+# 9.x handled by the above variables (temporary hack, to be removed with 9.x support).
+# 10+ handled generically via awk: REQUIRES N → commented if MAJORVER < N*10;
+#                                   PRIOR TO N → commented if MAJORVER >= N*10.
+# IMPORTANT: Use only POSIX awk features here (no gawk extensions like gensub(),
+# 3-arg match(), etc.) — awk availability and compatibility across platforms is
+# the whole reason this approach was chosen over sed.
+define _apply_version_seds
+	$(_sql_sed_95)
+	$(_sql_sed_93)
+	awk -v mv=$(MAJORVER) '\
+		/-- SED: REQUIRES [1-9][0-9]+!/ {t=$$0; sub(/.*REQUIRES /,"",t); sub(/!.*/,"",t); if(mv<t*10) $$0="-- Requires "t": "$$0}\
+		/-- SED: PRIOR TO [1-9][0-9]+!/ {t=$$0; sub(/.*PRIOR TO /,"",t); sub(/!.*/,"",t); if(mv>=t*10) $$0="-- Not used prior to "t": "$$0}\
+		{print}' $@.tmp > $@.tmp2 && mv $@.tmp2 $@.tmp
+endef
 
 # TODO: refactor the version stuff into a function
 #
@@ -35,16 +66,22 @@ EXTRA_CLEAN += $B/cat_tools.sql $(filter-out $(EXTENSION_VERSION_FILES), $(versi
 #.PRECIOUS: $B/cat_tools.sql
 $B/%.sql: sql/%.sql.in pgxntool/safesed
 	(echo @generated@ && cat $< && echo @generated@) | sed -e 's#@generated@#-- GENERATED FILE! DO NOT EDIT! See $<#' > $@.tmp
-ifeq ($(LT95),yes)
-	pgxntool/safesed $@.tmp -E -e 's/(.*)-- SED: REQUIRES 9.5!/-- Requires 9.5: \1/'
-else
-	pgxntool/safesed $@.tmp -E -e 's/(.*)-- SED: PRIOR TO 9.5!/-- Not used prior to 9.5: \1/'
-endif
-ifeq ($(LT93),yes)
-	pgxntool/safesed $@.tmp -E -e 's/(.*)-- SED: REQUIRES 9.3!/-- Requires 9.3: \1/'
-else
-	pgxntool/safesed $@.tmp -E -e 's/(.*)-- SED: PRIOR TO 9.3!/-- Not used prior to 9.3: \1/'
-endif
+	$(_apply_version_seds)
+	mv $@.tmp $@
+
+# Generate the current version's .sql.in by copying the base source.
+# This intermediate file is then processed by the pattern rule above to produce
+# the final .sql with version-conditional SED substitutions applied.
+$(EXTENSION_VERSION_FILES:.sql=.sql.in): sql/cat_tools.sql.in cat_tools.control
+	cp $< $@
+
+# Override the control.mk rule that builds EXTENSION_VERSION_FILES directly from
+# cat_tools.sql (bypassing SED processing). Instead, build from the .sql.in above
+# so that version-conditional substitutions (-- SED: REQUIRES X!) are applied.
+# Note: GNU Make will emit "overriding recipe" for this target — that is expected.
+$(EXTENSION_VERSION_FILES): $(EXTENSION_VERSION_FILES:.sql=.sql.in) pgxntool/safesed
+	(echo @generated@ && cat $< && echo @generated@) | sed -e 's#@generated@#-- GENERATED FILE! DO NOT EDIT! See $<#' > $@.tmp
+	$(_apply_version_seds)
 	mv $@.tmp $@
 
 # Support for upgrade test
