@@ -109,10 +109,12 @@ $(TEST_BUILD_DIR)/active.sql: $(TEST_BUILD_DIR)/dep.mk $(TEST_BUILD_DIR)/$(TEST_
 	ln -sf $(TEST_LOAD_SOURCE).sql $@
 
 $(TEST_BUILD_DIR)/upgrade.sql: test/load_upgrade.sql $(TEST_BUILD_DIR) old_version
-	(echo @generated@ && cat $< && echo @generated@) | sed -e 's#@generated@#-- GENERATED FILE! DO NOT EDIT! See $<#' > $@
+	(echo @generated@ && cat $< && echo @generated@) | sed -e 's#@generated@#-- GENERATED FILE! DO NOT EDIT! See $<#' > $@.tmp
+	mv $@.tmp $@
 
 $(TEST_BUILD_DIR)/new.sql: test/load_new.sql $(TEST_BUILD_DIR)
-	(echo @generated@ && cat $< && echo @generated@) | sed -e 's#@generated@#-- GENERATED FILE! DO NOT EDIT! See $<#' > $@
+	(echo @generated@ && cat $< && echo @generated@) | sed -e 's#@generated@#-- GENERATED FILE! DO NOT EDIT! See $<#' > $@.tmp
+	mv $@.tmp $@
 
 # TODO: figure out vpath
 EXTRA_CLEAN += $(TEST_BUILD_DIR)/
