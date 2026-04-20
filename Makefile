@@ -72,6 +72,7 @@ $B/%.sql: sql/%.sql.in pgxntool/safesed
 # Generate the current version's .sql.in by copying the base source.
 # This intermediate file is then processed by the pattern rule above to produce
 # the final .sql with version-conditional SED substitutions applied.
+# (EXTENSION_VERSION_FILES is just sql/cat_tools--<current version>.sql)
 $(EXTENSION_VERSION_FILES:.sql=.sql.in): sql/cat_tools.sql.in cat_tools.control
 	cp $< $@
 
