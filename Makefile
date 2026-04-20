@@ -12,12 +12,14 @@ $B:
 
 versioned_in = $(wildcard sql/*--*.sql.in)
 versioned_out = $(subst sql/,$B/,$(subst .sql.in,.sql,$(versioned_in)))
+# Upgrade scripts (*--*--*.sql) are already added by base.mk via $(wildcard sql/*--*--*.sql).
+versioned_upgrade_out = $(subst sql/,$B/,$(subst .sql.in,.sql,$(wildcard sql/*--*--*.sql.in)))
 
 # Pre-built historical install scripts (no .sql.in source available)
 DATA += sql/cat_tools--0.1.0.sql sql/cat_tools--0.1.3.sql sql/cat_tools--0.1.4.sql sql/cat_tools--0.1.5.sql
 # Generated historical install scripts (built from .sql.in source).
-# Exclude EXTENSION_VERSION_FILES since the current version is managed by control.mk.
-DATA += $(filter-out $(EXTENSION_VERSION_FILES), $(versioned_out))
+# Exclude EXTENSION_VERSION_FILES (managed by control.mk) and upgrade scripts (handled by base.mk).
+DATA += $(filter-out $(EXTENSION_VERSION_FILES) $(versioned_upgrade_out), $(versioned_out))
 
 all: $B/cat_tools.sql $(versioned_out)
 installcheck: $B/cat_tools.sql $(versioned_out)
