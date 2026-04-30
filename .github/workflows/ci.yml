@@ -67,7 +67,8 @@ jobs:
             -d /var/lib/postgresql/${{ matrix.old_pg }}/test \
             -D /var/lib/postgresql/${{ matrix.new_pg }}/test \
             -o '-c config_file=/etc/postgresql/${{ matrix.old_pg }}/test/postgresql.conf' \
-            -O '-c config_file=/etc/postgresql/${{ matrix.new_pg }}/test/postgresql.conf'" postgres
+            -O '-c config_file=/etc/postgresql/${{ matrix.new_pg }}/test/postgresql.conf'" postgres \
+            || { echo "--- pg_upgrade logs ---"; cat /tmp/pg_upgrade_dump_*.log 2>/dev/null || true; exit 1; }
           pg_ctlcluster ${{ matrix.new_pg }} test start
       - name: Verify extension version after upgrade
         run: |
