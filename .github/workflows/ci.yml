@@ -1,5 +1,9 @@
 name: CI
-on: [push, pull_request]
+on:
+  push:
+    branches:
+      - master
+  pull_request:
 jobs:
   test:
     strategy:
@@ -59,7 +63,11 @@ jobs:
       - name: Stop old cluster, binary pg_upgrade to PostgreSQL ${{ matrix.new_pg }}, start new cluster
         run: |
           pg_ctlcluster ${{ matrix.old_pg }} test stop
-          pg_createcluster ${{ matrix.new_pg }} test -- --no-data-checksums
+          checksum_flag=""
+          if psql -U postgres -tAc "SELECT setting FROM pg_settings WHERE name='data_checksums'" | grep -q on; then
+            checksum_flag="-- --data-checksums"
+          fi
+          pg_createcluster ${{ matrix.new_pg }} test $checksum_flag
           sed -i "s/^port = .*/port = 5432/" /etc/postgresql/${{ matrix.new_pg }}/test/postgresql.conf
           mkdir -p /tmp/pg_upgrade_logs
           chown postgres:postgres /tmp/pg_upgrade_logs
