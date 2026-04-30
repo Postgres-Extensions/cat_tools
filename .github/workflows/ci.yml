@@ -59,7 +59,7 @@ jobs:
       - name: Stop old cluster, binary pg_upgrade to PostgreSQL ${{ matrix.new_pg }}, start new cluster
         run: |
           pg_ctlcluster ${{ matrix.old_pg }} test stop
-          pg_createcluster ${{ matrix.new_pg }} test
+          pg_createcluster ${{ matrix.new_pg }} test -- --no-data-checksums
           sed -i "s/^port = .*/port = 5432/" /etc/postgresql/${{ matrix.new_pg }}/test/postgresql.conf
           mkdir -p /tmp/pg_upgrade_logs
           chown postgres:postgres /tmp/pg_upgrade_logs
@@ -70,7 +70,7 @@ jobs:
             -D /var/lib/postgresql/${{ matrix.new_pg }}/test \
             -o '-c config_file=/etc/postgresql/${{ matrix.old_pg }}/test/postgresql.conf' \
             -O '-c config_file=/etc/postgresql/${{ matrix.new_pg }}/test/postgresql.conf'" postgres \
-            || { tail -n +1 /tmp/pg_upgrade_logs/*.log; exit 1; }
+            || { find /tmp/pg_upgrade_logs -name '*.log' | sort | xargs -r tail -n +1; exit 1; }
           pg_ctlcluster ${{ matrix.new_pg }} test start
       - name: Verify extension version after upgrade
         run: |
