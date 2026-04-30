@@ -34,7 +34,7 @@ jobs:
             new_pg: "13"
           - old_pg: "12"
             new_pg: "18"
-    name: 🔄 pg_upgrade ${{ matrix.old_pg }} → ${{ matrix.new_pg }}
+    name: 🔄 Binary pg_upgrade ${{ matrix.old_pg }} → ${{ matrix.new_pg }}
     runs-on: ubuntu-latest
     container: pgxn/pgxn-tools
     steps:
@@ -56,8 +56,19 @@ jobs:
         run: apt-get install -y postgresql-${{ matrix.new_pg }} postgresql-server-dev-${{ matrix.new_pg }}
       - name: Install cat_tools into new cluster
         run: make install PGUSER=postgres PG_CONFIG=/usr/lib/postgresql/${{ matrix.new_pg }}/bin/pg_config
-      - name: Upgrade cluster to PostgreSQL ${{ matrix.new_pg }}
-        run: pg_upgradecluster -v ${{ matrix.new_pg }} ${{ matrix.old_pg }} test
+      - name: Stop old cluster, binary pg_upgrade to PostgreSQL ${{ matrix.new_pg }}, start new cluster
+        run: |
+          pg_ctlcluster ${{ matrix.old_pg }} test stop
+          pg_createcluster ${{ matrix.new_pg }} test
+          sed -i "s/^port = .*/port = 5432/" /etc/postgresql/${{ matrix.new_pg }}/test/postgresql.conf
+          su -c "cd /tmp && /usr/lib/postgresql/${{ matrix.new_pg }}/bin/pg_upgrade \
+            -b /usr/lib/postgresql/${{ matrix.old_pg }}/bin \
+            -B /usr/lib/postgresql/${{ matrix.new_pg }}/bin \
+            -d /var/lib/postgresql/${{ matrix.old_pg }}/test \
+            -D /var/lib/postgresql/${{ matrix.new_pg }}/test \
+            -o '-c config_file=/etc/postgresql/${{ matrix.old_pg }}/test/postgresql.conf' \
+            -O '-c config_file=/etc/postgresql/${{ matrix.new_pg }}/test/postgresql.conf'" postgres
+          pg_ctlcluster ${{ matrix.new_pg }} test start
       - name: Verify extension version after upgrade
         run: |
           VERSION=$(psql -U postgres -d cat_tools_upgrade_test -tAc "SELECT extversion FROM pg_extension WHERE extname = 'cat_tools'")
