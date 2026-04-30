@@ -61,14 +61,16 @@ jobs:
           pg_ctlcluster ${{ matrix.old_pg }} test stop
           pg_createcluster ${{ matrix.new_pg }} test
           sed -i "s/^port = .*/port = 5432/" /etc/postgresql/${{ matrix.new_pg }}/test/postgresql.conf
-          su -c "cd /tmp && /usr/lib/postgresql/${{ matrix.new_pg }}/bin/pg_upgrade \
+          mkdir -p /tmp/pg_upgrade_logs
+          chown postgres:postgres /tmp/pg_upgrade_logs
+          su -c "cd /tmp/pg_upgrade_logs && /usr/lib/postgresql/${{ matrix.new_pg }}/bin/pg_upgrade \
             -b /usr/lib/postgresql/${{ matrix.old_pg }}/bin \
             -B /usr/lib/postgresql/${{ matrix.new_pg }}/bin \
             -d /var/lib/postgresql/${{ matrix.old_pg }}/test \
             -D /var/lib/postgresql/${{ matrix.new_pg }}/test \
             -o '-c config_file=/etc/postgresql/${{ matrix.old_pg }}/test/postgresql.conf' \
             -O '-c config_file=/etc/postgresql/${{ matrix.new_pg }}/test/postgresql.conf'" postgres \
-            || { echo "--- pg_upgrade logs ---"; cat /tmp/pg_upgrade_dump_*.log 2>/dev/null || true; exit 1; }
+            || { tail -n +1 /tmp/pg_upgrade_logs/*.log; exit 1; }
           pg_ctlcluster ${{ matrix.new_pg }} test start
       - name: Verify extension version after upgrade
         run: |
