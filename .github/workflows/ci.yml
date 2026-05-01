@@ -5,6 +5,25 @@ on:
       - master
   pull_request:
 jobs:
+  test:
+    strategy:
+      matrix:
+        pg: [18, 17, 16, 15, 14, 13, 12, 11, 10]
+    name: 🐘 PostgreSQL ${{ matrix.pg }}
+    runs-on: ubuntu-latest
+    container: pgxn/pgxn-tools
+    env:
+      PGUSER: postgres
+    steps:
+      - name: Start PostgreSQL ${{ matrix.pg }}
+        run: pg-start ${{ matrix.pg }}
+      - name: Check out the repo
+        uses: actions/checkout@v4
+      - name: Install rsync
+        run: apt-get install -y rsync
+      - name: Test on PostgreSQL ${{ matrix.pg }}
+        run: make test
+
   pg-upgrade-test:
     strategy:
       matrix:
