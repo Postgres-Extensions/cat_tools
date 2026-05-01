@@ -24,6 +24,11 @@ jobs:
     name: 🔄 Binary pg_upgrade ${{ matrix.old_pg }} → ${{ matrix.new_pg }}
     runs-on: ubuntu-latest
     container: pgxn/pgxn-tools
+    env:
+      PGUSER: postgres
+      # Both clusters must use the same initdb options so pg_upgrade sees
+      # consistent settings (checksums, auth) on old and new clusters.
+      INITDB_OPTS: --data-checksums --auth trust
     steps:
       - name: Start PostgreSQL ${{ matrix.old_pg }}
         run: pg-start ${{ matrix.old_pg }}
@@ -34,30 +39,32 @@ jobs:
           # -p 5432: pg_createcluster assigns the next available port, which
           # may not be 5432 after pg-start has claimed and released it. Force
           # 5432 so subsequent psql/createdb calls connect without -p.
-          pg_createcluster -p 5432 ${{ matrix.old_pg }} test -- --data-checksums --auth trust
+          pg_createcluster -p 5432 ${{ matrix.old_pg }} test -- $INITDB_OPTS
           pg_ctlcluster ${{ matrix.old_pg }} test start
-          pg_isready -U postgres -t 30
+          pg_isready -t 30
       - name: Check out the repo
         uses: actions/checkout@v4
       - name: Install rsync
         run: apt-get install -y rsync
       - name: Install cat_tools into old cluster
-        run: make install PGUSER=postgres
+        run: make install
       - name: Test cat_tools on old cluster
-        run: make test PGUSER=postgres
+        run: make test
       - name: Prepare upgrade test database
         run: |
-          createdb -U postgres cat_tools_upgrade_test
-          psql -U postgres -d cat_tools_upgrade_test -c "CREATE EXTENSION cat_tools"
+          createdb cat_tools_upgrade_test
+          psql -d cat_tools_upgrade_test -c "CREATE EXTENSION cat_tools"
       - name: Install PostgreSQL ${{ matrix.new_pg }}
         run: apt-get install -y postgresql-${{ matrix.new_pg }} postgresql-server-dev-${{ matrix.new_pg }}
       - name: Install cat_tools into new cluster
-        run: make install PGUSER=postgres PG_CONFIG=/usr/lib/postgresql/${{ matrix.new_pg }}/bin/pg_config
+        run: make install PG_CONFIG=/usr/lib/postgresql/${{ matrix.new_pg }}/bin/pg_config
       - name: Stop old cluster, binary pg_upgrade to PostgreSQL ${{ matrix.new_pg }}, start new cluster
         run: |
           pg_ctlcluster ${{ matrix.old_pg }} test stop
-          pg_createcluster ${{ matrix.new_pg }} test -- --data-checksums --auth trust
+          pg_createcluster ${{ matrix.new_pg }} test -- $INITDB_OPTS
           sed -i "s/^port = .*/port = 5432/" /etc/postgresql/${{ matrix.new_pg }}/test/postgresql.conf
+          # PG17+ writes logs to $new_datadir/pg_upgrade_output.d/; older
+          # versions write to CWD. Search both on failure.
           mkdir -p /tmp/pg_upgrade_logs
           chown postgres:postgres /tmp/pg_upgrade_logs
           su -c "cd /tmp/pg_upgrade_logs && /usr/lib/postgresql/${{ matrix.new_pg }}/bin/pg_upgrade \
@@ -67,15 +74,17 @@ jobs:
             -D /var/lib/postgresql/${{ matrix.new_pg }}/test \
             -o '-c config_file=/etc/postgresql/${{ matrix.old_pg }}/test/postgresql.conf' \
             -O '-c config_file=/etc/postgresql/${{ matrix.new_pg }}/test/postgresql.conf'" postgres \
-            || { find /tmp/pg_upgrade_logs -name '*.log' | sort | xargs -r tail -n +1; exit 1; }
+            || { find /tmp/pg_upgrade_logs \
+                      /var/lib/postgresql/${{ matrix.new_pg }}/test/pg_upgrade_output.d \
+                      -name '*.log' 2>/dev/null | sort | xargs -r tail -n +1; exit 1; }
           pg_ctlcluster ${{ matrix.new_pg }} test start
       - name: Verify extension version after upgrade
         run: |
-          VERSION=$(psql -U postgres -d cat_tools_upgrade_test -tAc "SELECT extversion FROM pg_extension WHERE extname = 'cat_tools'")
+          VERSION=$(psql -d cat_tools_upgrade_test -tAc "SELECT extversion FROM pg_extension WHERE extname = 'cat_tools'")
           echo "Extension version: ${VERSION:-<not found>}"
           echo "$VERSION" | grep -q "0.2.2"
       - name: Run test suite on new cluster
-        run: make test PGUSER=postgres
+        run: make test
 
   extension-update-test:
     strategy:
@@ -94,6 +103,8 @@ jobs:
     name: ⬆️ Extension update test on PostgreSQL ${{ matrix.pg }}
     runs-on: ubuntu-latest
     container: pgxn/pgxn-tools
+    env:
+      PGUSER: postgres
     steps:
       - name: Start PostgreSQL ${{ matrix.pg }}
         run: pg-start ${{ matrix.pg }}
@@ -102,21 +113,21 @@ jobs:
       - name: Install rsync
         run: apt-get install -y rsync
       - name: Install cat_tools (all versions)
-        run: make install PGUSER=postgres
+        run: make install
       - name: Test upgrade from 0.2.0 (direct 0.2.0→0.2.2 path)
         run: |
-          psql -U postgres -c "CREATE EXTENSION cat_tools VERSION '0.2.0'"
-          psql -U postgres -c "ALTER EXTENSION cat_tools UPDATE"
-          VERSION=$(psql -U postgres -tAc "SELECT extversion FROM pg_extension WHERE extname = 'cat_tools'")
+          psql -c "CREATE EXTENSION cat_tools VERSION '0.2.0'"
+          psql -c "ALTER EXTENSION cat_tools UPDATE"
+          VERSION=$(psql -tAc "SELECT extversion FROM pg_extension WHERE extname = 'cat_tools'")
           echo "Version after 0.2.0 upgrade: ${VERSION:-<not found>}"
           echo "$VERSION" | grep -q "0.2.2"
       - name: Test upgrade from 0.2.1 (0.2.1→0.2.2 path)
         run: |
-          createdb -U postgres cat_tools_from_021
-          psql -U postgres -d cat_tools_from_021 -c "CREATE EXTENSION cat_tools VERSION '0.2.1'"
-          psql -U postgres -d cat_tools_from_021 -c "ALTER EXTENSION cat_tools UPDATE"
-          VERSION=$(psql -U postgres -d cat_tools_from_021 -tAc "SELECT extversion FROM pg_extension WHERE extname = 'cat_tools'")
+          createdb cat_tools_from_021
+          psql -d cat_tools_from_021 -c "CREATE EXTENSION cat_tools VERSION '0.2.1'"
+          psql -d cat_tools_from_021 -c "ALTER EXTENSION cat_tools UPDATE"
+          VERSION=$(psql -d cat_tools_from_021 -tAc "SELECT extversion FROM pg_extension WHERE extname = 'cat_tools'")
           echo "Version after 0.2.1 upgrade: ${VERSION:-<not found>}"
           echo "$VERSION" | grep -q "0.2.2"
       - name: Run test suite on updated extension
-        run: make test PGUSER=postgres
+        run: make test
