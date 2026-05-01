@@ -71,6 +71,9 @@ jobs:
       - name: Install PostgreSQL ${{ matrix.new_pg }}
         run: apt-get install -y postgresql-${{ matrix.new_pg }} postgresql-server-dev-${{ matrix.new_pg }}
       - name: Install cat_tools into new cluster
+        # PG_CONFIG must be specified explicitly: at this point both old and new
+        # PostgreSQL are installed, and the default pg_config on PATH may not be
+        # the new version's.
         run: make install PG_CONFIG=/usr/lib/postgresql/${{ matrix.new_pg }}/bin/pg_config
       - name: Stop old cluster, binary pg_upgrade to PostgreSQL ${{ matrix.new_pg }}, start new cluster
         run: |
