@@ -67,10 +67,8 @@ jobs:
         run: apt-get install -y rsync
       - name: Install cat_tools into old cluster
         run: make install
-      - name: Prepare upgrade test database
-        run: |
-          createdb cat_tools_upgrade_test
-          psql -d cat_tools_upgrade_test -c "CREATE EXTENSION cat_tools"
+      - name: Install cat_tools extension into upgrade test database
+        run: psql -c "CREATE EXTENSION cat_tools"
       - name: Install PostgreSQL ${{ matrix.new_pg }}
         run: apt-get install -y postgresql-${{ matrix.new_pg }} postgresql-server-dev-${{ matrix.new_pg }}
       - name: Install cat_tools into new cluster
@@ -96,7 +94,7 @@ jobs:
           pg_ctlcluster ${{ matrix.new_pg }} test start
       - name: Verify extension version after upgrade
         run: |
-          VERSION=$(psql -d cat_tools_upgrade_test -tAc "SELECT extversion FROM pg_extension WHERE extname = 'cat_tools'")
+          VERSION=$(psql -tAc "SELECT extversion FROM pg_extension WHERE extname = 'cat_tools'")
           echo "Extension version: ${VERSION:-<not found>}"
           echo "$VERSION" | grep -q "0.2.2"
       - name: Run test suite on upgraded cluster
