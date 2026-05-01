@@ -47,6 +47,7 @@ jobs:
       # Both clusters must use the same initdb options so pg_upgrade sees
       # consistent settings (checksums, auth) on old and new clusters.
       INITDB_OPTS: --data-checksums --auth trust
+      PG_CONFIG: /usr/lib/postgresql/${{ matrix.new_pg }}/bin/pg_config
     steps:
       - name: Start PostgreSQL ${{ matrix.old_pg }}
         run: pg-start ${{ matrix.old_pg }}
@@ -69,16 +70,12 @@ jobs:
       - name: Test cat_tools on old cluster
         run: make test
       - name: Prepare upgrade test database
-        env:
-          PGDATABASE: cat_tools_upgrade_test
         run: |
-          createdb "$PGDATABASE"
-          psql -c "CREATE EXTENSION cat_tools"
+          createdb cat_tools_upgrade_test
+          psql -d cat_tools_upgrade_test -c "CREATE EXTENSION cat_tools"
       - name: Install PostgreSQL ${{ matrix.new_pg }}
         run: apt-get install -y postgresql-${{ matrix.new_pg }} postgresql-server-dev-${{ matrix.new_pg }}
       - name: Install cat_tools into new cluster
-        env:
-          PG_CONFIG: /usr/lib/postgresql/${{ matrix.new_pg }}/bin/pg_config
         run: make install
       - name: Stop old cluster, binary pg_upgrade to PostgreSQL ${{ matrix.new_pg }}, start new cluster
         run: |
@@ -101,10 +98,8 @@ jobs:
                       -name '*.log' 2>/dev/null | sort | xargs -r tail -n +1; exit 1; }
           pg_ctlcluster ${{ matrix.new_pg }} test start
       - name: Verify extension version after upgrade
-        env:
-          PGDATABASE: cat_tools_upgrade_test
         run: |
-          VERSION=$(psql -tAc "SELECT extversion FROM pg_extension WHERE extname = 'cat_tools'")
+          VERSION=$(psql -d cat_tools_upgrade_test -tAc "SELECT extversion FROM pg_extension WHERE extname = 'cat_tools'")
           echo "Extension version: ${VERSION:-<not found>}"
           echo "$VERSION" | grep -q "0.2.2"
       - name: Run test suite on new cluster
@@ -144,13 +139,11 @@ jobs:
           echo "Version after 0.2.0 upgrade: ${VERSION:-<not found>}"
           echo "$VERSION" | grep -q "0.2.2"
       - name: Test upgrade from 0.2.1 (0.2.1→0.2.2 path)
-        env:
-          PGDATABASE: cat_tools_from_021
         run: |
-          createdb "$PGDATABASE"
-          psql -c "CREATE EXTENSION cat_tools VERSION '0.2.1'"
-          psql -c "ALTER EXTENSION cat_tools UPDATE"
-          VERSION=$(psql -tAc "SELECT extversion FROM pg_extension WHERE extname = 'cat_tools'")
+          createdb cat_tools_from_021
+          psql -d cat_tools_from_021 -c "CREATE EXTENSION cat_tools VERSION '0.2.1'"
+          psql -d cat_tools_from_021 -c "ALTER EXTENSION cat_tools UPDATE"
+          VERSION=$(psql -d cat_tools_from_021 -tAc "SELECT extversion FROM pg_extension WHERE extname = 'cat_tools'")
           echo "Version after 0.2.1 upgrade: ${VERSION:-<not found>}"
           echo "$VERSION" | grep -q "0.2.2"
       - name: Run test suite on updated extension
