@@ -62,12 +62,21 @@ jobs:
         run: make install PGUSER=postgres PG_CONFIG=/usr/lib/postgresql/${{ matrix.new_pg }}/bin/pg_config
       - name: Stop old cluster, binary pg_upgrade to PostgreSQL ${{ matrix.new_pg }}, start new cluster
         run: |
-          checksum_flag=""
-          if psql -U postgres -tAc "SELECT setting FROM pg_settings WHERE name='data_checksums'" | grep -q on; then
-            checksum_flag="-- --data-checksums"
-          fi
           pg_ctlcluster ${{ matrix.old_pg }} test stop
-          pg_createcluster ${{ matrix.new_pg }} test $checksum_flag
+          checksum_initdb_flag=""
+          if /usr/lib/postgresql/${{ matrix.old_pg }}/bin/pg_controldata \
+              /var/lib/postgresql/${{ matrix.old_pg }}/test \
+              | grep -q "Data page checksum version: [^0]"; then
+            checksum_initdb_flag="--data-checksums"
+          elif /usr/lib/postgresql/${{ matrix.new_pg }}/bin/initdb --help 2>&1 \
+              | grep -q -- "--no-data-checksums"; then
+            checksum_initdb_flag="--no-data-checksums"
+          fi
+          if [ -n "$checksum_initdb_flag" ]; then
+            pg_createcluster ${{ matrix.new_pg }} test -- $checksum_initdb_flag
+          else
+            pg_createcluster ${{ matrix.new_pg }} test
+          fi
           sed -i "s/^port = .*/port = 5432/" /etc/postgresql/${{ matrix.new_pg }}/test/postgresql.conf
           mkdir -p /tmp/pg_upgrade_logs
           chown postgres:postgres /tmp/pg_upgrade_logs
