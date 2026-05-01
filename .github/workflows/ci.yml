@@ -31,7 +31,7 @@ jobs:
         run: |
           pg_ctlcluster ${{ matrix.old_pg }} test stop
           pg_dropcluster ${{ matrix.old_pg }} test
-          pg_createcluster -p 5432 ${{ matrix.old_pg }} test -- --data-checksums
+          pg_createcluster -p 5432 ${{ matrix.old_pg }} test -- --data-checksums --auth trust
           pg_ctlcluster ${{ matrix.old_pg }} test start
           pg_isready -U postgres -t 30
       - name: Check out the repo
