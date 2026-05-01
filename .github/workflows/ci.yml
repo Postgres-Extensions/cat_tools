@@ -44,6 +44,12 @@ jobs:
     steps:
       - name: Start PostgreSQL ${{ matrix.old_pg }}
         run: pg-start ${{ matrix.old_pg }}
+      - name: Recreate old cluster with data checksums enabled
+        run: |
+          pg_ctlcluster ${{ matrix.old_pg }} test stop
+          pg_dropcluster ${{ matrix.old_pg }} test
+          pg_createcluster ${{ matrix.old_pg }} test -- --data-checksums
+          pg_ctlcluster ${{ matrix.old_pg }} test start
       - name: Check out the repo
         uses: actions/checkout@v4
       - name: Install rsync
@@ -63,20 +69,7 @@ jobs:
       - name: Stop old cluster, binary pg_upgrade to PostgreSQL ${{ matrix.new_pg }}, start new cluster
         run: |
           pg_ctlcluster ${{ matrix.old_pg }} test stop
-          checksum_initdb_flag=""
-          if /usr/lib/postgresql/${{ matrix.old_pg }}/bin/pg_controldata \
-              /var/lib/postgresql/${{ matrix.old_pg }}/test \
-              | grep -q "Data page checksum version: [^0]"; then
-            checksum_initdb_flag="--data-checksums"
-          elif /usr/lib/postgresql/${{ matrix.new_pg }}/bin/initdb --help 2>&1 \
-              | grep -q -- "--no-data-checksums"; then
-            checksum_initdb_flag="--no-data-checksums"
-          fi
-          if [ -n "$checksum_initdb_flag" ]; then
-            pg_createcluster ${{ matrix.new_pg }} test -- $checksum_initdb_flag
-          else
-            pg_createcluster ${{ matrix.new_pg }} test
-          fi
+          pg_createcluster ${{ matrix.new_pg }} test -- --data-checksums
           sed -i "s/^port = .*/port = 5432/" /etc/postgresql/${{ matrix.new_pg }}/test/postgresql.conf
           mkdir -p /tmp/pg_upgrade_logs
           chown postgres:postgres /tmp/pg_upgrade_logs
