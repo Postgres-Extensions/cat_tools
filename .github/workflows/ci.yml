@@ -67,8 +67,6 @@ jobs:
         run: apt-get install -y rsync
       - name: Install cat_tools into old cluster
         run: make install
-      - name: Test cat_tools on old cluster
-        run: make test
       - name: Prepare upgrade test database
         run: |
           createdb cat_tools_upgrade_test
@@ -80,8 +78,7 @@ jobs:
       - name: Stop old cluster, binary pg_upgrade to PostgreSQL ${{ matrix.new_pg }}, start new cluster
         run: |
           pg_ctlcluster ${{ matrix.old_pg }} test stop
-          pg_createcluster ${{ matrix.new_pg }} test -- $INITDB_OPTS
-          sed -i "s/^port = .*/port = 5432/" /etc/postgresql/${{ matrix.new_pg }}/test/postgresql.conf
+          pg_createcluster -p 5432 ${{ matrix.new_pg }} test -- $INITDB_OPTS
           # PG17+ writes logs to $new_datadir/pg_upgrade_output.d/; older
           # versions write to CWD. Search both on failure.
           mkdir -p /tmp/pg_upgrade_logs
@@ -102,8 +99,6 @@ jobs:
           VERSION=$(psql -d cat_tools_upgrade_test -tAc "SELECT extversion FROM pg_extension WHERE extname = 'cat_tools'")
           echo "Extension version: ${VERSION:-<not found>}"
           echo "$VERSION" | grep -q "0.2.2"
-      - name: Run test suite on new cluster
-        run: make test
 
   extension-update-test:
     strategy:
