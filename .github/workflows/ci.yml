@@ -99,6 +99,12 @@ jobs:
           VERSION=$(psql -d cat_tools_upgrade_test -tAc "SELECT extversion FROM pg_extension WHERE extname = 'cat_tools'")
           echo "Extension version: ${VERSION:-<not found>}"
           echo "$VERSION" | grep -q "0.2.2"
+      - name: Run test suite on upgraded cluster
+        run: make test
+      # TODO: also test ALTER EXTENSION cat_tools UPDATE here, once the
+      # pg_upgrade source versions (e.g. 0.2.0) can install on the new_pg
+      # version. Currently the pre-0.2.2 install scripts fail on PG11+ so
+      # we cannot pg_upgrade from a cluster that has them installed.
 
   extension-update-test:
     strategy:
