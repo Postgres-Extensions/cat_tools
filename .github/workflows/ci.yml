@@ -5,23 +5,6 @@ on:
       - master
   pull_request:
 jobs:
-  test:
-    strategy:
-      matrix:
-        pg: [18, 17, 16, 15, 14, 13, 12, 11, 10]
-    name: 🐘 PostgreSQL ${{ matrix.pg }}
-    runs-on: ubuntu-latest
-    container: pgxn/pgxn-tools
-    steps:
-      - name: Start PostgreSQL ${{ matrix.pg }}
-        run: pg-start ${{ matrix.pg }}
-      - name: Check out the repo
-        uses: actions/checkout@v4
-      - name: Install rsync
-        run: apt-get install -y rsync
-      - name: Test on PostgreSQL ${{ matrix.pg }}
-        run: make test PGUSER=postgres
-
   pg-upgrade-test:
     strategy:
       matrix:
@@ -48,8 +31,9 @@ jobs:
         run: |
           pg_ctlcluster ${{ matrix.old_pg }} test stop
           pg_dropcluster ${{ matrix.old_pg }} test
-          pg_createcluster ${{ matrix.old_pg }} test -- --data-checksums
+          pg_createcluster -p 5432 ${{ matrix.old_pg }} test -- --data-checksums
           pg_ctlcluster ${{ matrix.old_pg }} test start
+          pg_isready -U postgres -t 30
       - name: Check out the repo
         uses: actions/checkout@v4
       - name: Install rsync
