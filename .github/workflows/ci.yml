@@ -47,7 +47,6 @@ jobs:
       # Both clusters must use the same initdb options so pg_upgrade sees
       # consistent settings (checksums, auth) on old and new clusters.
       INITDB_OPTS: --data-checksums --auth trust
-      PG_CONFIG: /usr/lib/postgresql/${{ matrix.new_pg }}/bin/pg_config
     steps:
       - name: Start PostgreSQL ${{ matrix.old_pg }}
         run: pg-start ${{ matrix.old_pg }}
@@ -72,7 +71,7 @@ jobs:
       - name: Install PostgreSQL ${{ matrix.new_pg }}
         run: apt-get install -y postgresql-${{ matrix.new_pg }} postgresql-server-dev-${{ matrix.new_pg }}
       - name: Install cat_tools into new cluster
-        run: make install
+        run: make install PG_CONFIG=/usr/lib/postgresql/${{ matrix.new_pg }}/bin/pg_config
       - name: Stop old cluster, binary pg_upgrade to PostgreSQL ${{ matrix.new_pg }}, start new cluster
         run: |
           pg_ctlcluster ${{ matrix.old_pg }} test stop
