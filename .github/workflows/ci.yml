@@ -31,7 +31,10 @@ jobs:
         run: |
           pg_ctlcluster ${{ matrix.old_pg }} test stop
           pg_dropcluster ${{ matrix.old_pg }} test
-          pg_createcluster ${{ matrix.old_pg }} test -- --data-checksums --auth trust
+          # -p 5432: pg_createcluster assigns the next available port, which
+          # may not be 5432 after pg-start has claimed and released it. Force
+          # 5432 so subsequent psql/createdb calls connect without -p.
+          pg_createcluster -p 5432 ${{ matrix.old_pg }} test -- --data-checksums --auth trust
           pg_ctlcluster ${{ matrix.old_pg }} test start
           pg_isready -U postgres -t 30
       - name: Check out the repo
