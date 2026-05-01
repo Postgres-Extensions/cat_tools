@@ -67,7 +67,7 @@ CREATE OR REPLACE VIEW _cat_tools.pg_class_v AS
       LEFT JOIN pg_namespace n ON( n.oid = c.relnamespace )
 ;
 $fmt$
-  , __cat_tools.omit_column('pg_catalog.pg_class', array['oid', 'relhasoids'])
+  , __cat_tools.omit_column('pg_catalog.pg_class', array['oid', 'relhasoids', 'relhaspkey'])
 ));
 REVOKE ALL ON _cat_tools.pg_class_v FROM public;
 
