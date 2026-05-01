@@ -56,7 +56,7 @@ jobs:
       - name: Stop old cluster, binary pg_upgrade to PostgreSQL ${{ matrix.new_pg }}, start new cluster
         run: |
           pg_ctlcluster ${{ matrix.old_pg }} test stop
-          pg_createcluster ${{ matrix.new_pg }} test -- --data-checksums
+          pg_createcluster ${{ matrix.new_pg }} test -- --data-checksums --auth trust
           sed -i "s/^port = .*/port = 5432/" /etc/postgresql/${{ matrix.new_pg }}/test/postgresql.conf
           mkdir -p /tmp/pg_upgrade_logs
           chown postgres:postgres /tmp/pg_upgrade_logs
