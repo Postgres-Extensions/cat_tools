@@ -1,6 +1,6 @@
 \set ECHO none
 1..89
-ok 1 - Verify count from routine_kinds
+ok 1 - Verify count from type
 ok 2 - Simple sanity check of routine__type()
 ok 3 - Simple sanity check of routine__type() with enum
 ok 4 - SELECT cat_tools.routine__type('f'::cat_tools.routine_prokind)
@@ -15,7 +15,7 @@ ok 12 - SELECT cat_tools.routine__type('f')
 ok 13 - SELECT cat_tools.routine__type('p')
 ok 14 - SELECT cat_tools.routine__type('a')
 ok 15 - SELECT cat_tools.routine__type('w')
-ok 16 - Verify count from argument_modes
+ok 16 - Verify count from argument_mode
 ok 17 - Simple sanity check of routine__argument_mode()
 ok 18 - Simple sanity check of routine__argument_mode() with enum
 ok 19 - SELECT cat_tools.routine__argument_mode('i'::cat_tools.routine_proargmode)
@@ -33,7 +33,7 @@ ok 30 - SELECT cat_tools.routine__argument_mode('o')
 ok 31 - SELECT cat_tools.routine__argument_mode('b')
 ok 32 - SELECT cat_tools.routine__argument_mode('v')
 ok 33 - SELECT cat_tools.routine__argument_mode('t')
-ok 34 - Verify count from volatilities
+ok 34 - Verify count from volatility
 ok 35 - Simple sanity check of routine__volatility()
 ok 36 - Simple sanity check of routine__volatility() with enum
 ok 37 - SELECT cat_tools.routine__volatility('i'::cat_tools.routine_provolatile)
@@ -45,7 +45,7 @@ ok 42 - SELECT cat_tools.routine__volatility('v'::"char")
 ok 43 - SELECT cat_tools.routine__volatility('i')
 ok 44 - SELECT cat_tools.routine__volatility('s')
 ok 45 - SELECT cat_tools.routine__volatility('v')
-ok 46 - Verify count from parallel_safeties
+ok 46 - Verify count from parallel_safety
 ok 47 - Simple sanity check of routine__parallel_safety()
 ok 48 - Simple sanity check of routine__parallel_safety() with enum
 ok 49 - SELECT cat_tools.routine__parallel_safety('s'::cat_tools.routine_proparallel)

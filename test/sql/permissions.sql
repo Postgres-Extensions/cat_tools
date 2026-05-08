@@ -27,7 +27,7 @@ SELECT p.oid, p.proname, pg_get_function_arguments(p.oid) AS args
 GRANT SELECT ON cat_functions TO :use_role, :no_use_role;
 
 SELECT plan(
-    (SELECT count(*)::int FROM cat_types) * 2      -- no_use throws + use lives
+    (SELECT count(*)::int FROM cat_types) * 2      -- no_use denied + use allowed
   + (SELECT count(*)::int FROM cat_functions) * 2  -- no_use denied + use allowed
 );
 
