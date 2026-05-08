@@ -1,15 +1,17 @@
 /*
  * Enum mapping helper: tests two sets of roundtrip behavior for a pair of
- * "char"-based and human-readable enums.
+ * "char"-based and human-readable enums, preceded by a size check.
  *
- * Set 1 - Sanity checks:
- *   Verifies both enums are the same size, and that the mapping function
- *   returns the expected result for the given sample values.
+ * Set 1 - Individual example (fully specified):
+ *   Tests with a known sample value (sample_char -> sample_text), verifying
+ *   that the mapping function returns exactly the right result.  This is the
+ *   most meaningful correctness check because the expected output is
+ *   externally specified rather than derived from the enum itself.
  *
- * Set 2 - Full enum coverage:
+ * Set 2 - All-values coverage (simpler roundtrip):
  *   For every value in both enums (via _enum_pairs view), verifies the
- *   mapping function returns the correct result when called with the
- *   enum type, the "char" type, and a plain text argument.
+ *   mapping function does not return NULL/error when called with the enum
+ *   type, the "char" type, and a plain text argument.  Breadth over depth.
  *
  * Required variables (set before \i):
  *   s           - schema name (typically already set globally, e.g. cat_tools)
@@ -46,13 +48,15 @@ CREATE OR REPLACE TEMP VIEW _enum_pairs AS
     ) gs
 ;
 
--- Set 1: Sanity checks
+-- Prerequisite: both enums must be the same size
 
 SELECT is(
     array_length(cat_tools.enum_range(:'__enum_type'), 1)
     , array_length(cat_tools.enum_range(:'__char_enum_type'), 1)
     , 'Verify ' || :'kind' || ' and ' || :'char_col' || ' enums have same size'
   );
+
+-- Set 1: Individual example with fully specified expected value
 
 SELECT is(
     :s.routine__:kind(:'sample_char')
@@ -66,7 +70,7 @@ SELECT is(
     , 'Simple sanity check of ' || :'__f' || '() with enum'
   );
 
--- Set 2: Full enum coverage
+-- Set 2: All-values coverage (simpler roundtrip across every enum entry)
 
 SELECT is(
     :s.routine__:kind(char_val:::__char_enum_type)::text

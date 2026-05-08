@@ -13,15 +13,18 @@ SELECT plan(
   + (1 + 2 + 3 * array_length(cat_tools.enum_range('cat_tools.routine_parallel_safety'), 1))
   + 2  -- no_use_role access denied for parse helpers (throws_ok via func_calls)
   + 1  -- security check when current_user != session_user
-  + 4  -- routine__parse_arg_types() with various arg combinations
-  + 4  -- routine__parse_arg_names() with various arg combinations
   + 1  -- create pg_temp.test_function
-  + 4  -- routine__arg_types() return values
   + 1  -- create pg_temp.named_function
-  + 3  -- routine__arg_names() return values
-  + 4  -- routine__arg_types_text() formatting
-  + 4  -- routine__arg_names_text() formatting
-  + 4  -- isnt_definer security checks for public routine__ callers
+  + 4  -- routine__parse_arg_types() tests
+  + 1  -- isnt_definer: routine__parse_arg_types
+  + 1  -- isnt_definer: routine__parse_arg_types_text
+  + 4  -- routine__arg_types() tests
+  + 4  -- routine__arg_types_text() tests
+  + 4  -- routine__parse_arg_names() tests
+  + 1  -- isnt_definer: routine__parse_arg_names
+  + 1  -- isnt_definer: routine__parse_arg_names_text
+  + 3  -- routine__arg_names() tests
+  + 4  -- routine__arg_names_text() tests
 );
 
 \set kind        type
@@ -72,8 +75,9 @@ SELECT throws_ok(
 ;
 
 /*
- * Test that the security check works when current_user != session_user
- * This tests what happens when functions are called from a different role context
+ * Test that the security check works when current_user != session_user.
+ * SET LOCAL ROLE makes current_user = use_role while session_user = superuser,
+ * so current_user != session_user, and the function should throw 28000.
  */
 SET LOCAL ROLE :use_role;
 SELECT throws_ok(
@@ -84,11 +88,30 @@ SELECT throws_ok(
 );
 
 /*
- * The helper functions now have security checks that prevent execution when
- * current_user != session_user (which happens with SET LOCAL ROLE).
- * Reset to session_user for testing the actual functionality.
+ * SET SESSION AUTHORIZATION satisfies the current_user = session_user check
+ * required by the parse helper security guard.  All functional tests below
+ * run under this authorization.
  */
 SET SESSION AUTHORIZATION :use_role;
+
+-- Create pg_temp test functions now that we have a stable session_user.
+\set args 'anyarray, OUT text, OUT "char", pg_class, int, VARIADIC boolean[]'
+SELECT lives_ok(
+  format(
+    $$CREATE FUNCTION pg_temp.test_function(%s) LANGUAGE plpgsql AS $body$BEGIN NULL; END$body$;$$
+    , :'args'
+  )
+  , format('Create pg_temp.test_function(%s)', :'args')
+);
+
+SELECT lives_ok(
+  $$CREATE FUNCTION pg_temp.named_function(input_val int, INOUT inout_val text, OUT output_val boolean) LANGUAGE plpgsql AS $body$BEGIN output_val := true; END$body$;$$
+  , 'Create pg_temp.named_function with named arguments'
+);
+
+/*
+ * routine__parse_arg_types / routine__parse_arg_types_text
+ */
 
 SELECT is(
   :s.routine__parse_arg_types($$IN in_int int, INOUT inout_int_array int[], OUT out_char "char", anyelement, boolean DEFAULT false$$)
@@ -114,95 +137,47 @@ SELECT is(
   , 'Verify routine__parse_arg_types() with only inputs'
 );
 
-SELECT is(
-  :s.routine__parse_arg_names($$IN in_int int, INOUT inout_int_array int[], OUT out_char "char", anyelement, boolean DEFAULT false$$)
-  , '{in_int,inout_int_array,NULL,NULL}'::text[]
-  , 'Verify routine__parse_arg_names() with INOUT and OUT'
-);
+/*
+ * CRITICAL SECURITY TESTS: public routine__ functions must NOT be SECURITY DEFINER.
+ * If they were, they could be exploited for SQL injection since they execute
+ * dynamic SQL with elevated privileges.
+ */
 
-SELECT is(
-  :s.routine__parse_arg_names($$IN in_int int, INOUT inout_int_array int[], anyarray, anyelement, boolean DEFAULT false$$)
-  , '{in_int,inout_int_array,NULL,NULL,NULL}'::text[]
-  , 'Verify routine__parse_arg_names() with just INOUT'
-);
+\set f routine__parse_arg_types
+SELECT string_to_array('text', ', ') AS _f_args \gset
+SELECT isnt_definer(:'s', :'f', :'_f_args'::name[]);
 
-SELECT is(
-  :s.routine__parse_arg_names($$IN in_int int, OUT out_char "char", anyarray, anyelement, boolean DEFAULT false$$)
-  , '{in_int,NULL,NULL,NULL}'::text[]
-  , 'Verify routine__parse_arg_names() with just OUT'
-);
+\set f routine__parse_arg_types_text
+SELECT isnt_definer(:'s', :'f', :'_f_args'::name[]);
 
-SELECT is(
-  :s.routine__parse_arg_names($$anyelement, "char", pg_class, VARIADIC boolean[]$$)
-  , '{NULL,NULL,NULL,NULL}'::text[]
-  , 'Verify routine__parse_arg_names() with only inputs'
-);
+/*
+ * routine__arg_types / routine__arg_types_text
+ */
 
--- Test new routine__arg_* functions that accept regprocedure
-\set args 'anyarray, OUT text, OUT "char", pg_class, int, VARIADIC boolean[]'
-SELECT lives_ok(
-  format(
-    $$CREATE FUNCTION pg_temp.test_function(%s) LANGUAGE plpgsql AS $body$BEGIN NULL; END$body$;$$
-    , :'args'
-  )
-  , format('Create pg_temp.test_function(%s)', :'args')
-);
-
--- Test routine__arg_types() - all argument types
 SELECT is(
   :s.routine__arg_types(:s.regprocedure('pg_temp.test_function', :'args'))
   , '{anyarray,pg_class,integer,boolean[]}'::regtype[]
   , 'Verify routine__arg_types() returns all argument types'
 );
 
--- Test routine__arg_types() with a function that has only IN arguments
 SELECT is(
   :s.routine__arg_types('array_length(anyarray,integer)'::regprocedure)
   , '{anyarray,integer}'::regtype[]
   , 'Verify routine__arg_types() with IN arguments only'
 );
 
--- Test routine__arg_types() with a function with no arguments
 SELECT is(
   :s.routine__arg_types('pg_backend_pid()'::regprocedure)
   , '{}'::regtype[]
   , 'Verify routine__arg_types() with no arguments'
 );
 
--- Test routine__arg_types() with a built-in function
 SELECT is(
   :s.routine__arg_types('concat("any")'::regprocedure)
   , '{"\"any\""}'::regtype[]
   , 'Verify routine__arg_types() with VARIADIC argument'
 );
 
--- Test routine__arg_names() - all argument names
-SELECT is(
-  :s.routine__arg_names(:s.regprocedure('pg_temp.test_function', :'args'))
-  , '{NULL,NULL,NULL,NULL}'::text[]
-  , 'Verify routine__arg_names() returns argument names (unnamed function)'
-);
-
--- Create a function with named arguments for testing
-SELECT lives_ok(
-  $$CREATE FUNCTION pg_temp.named_function(input_val int, INOUT inout_val text, OUT output_val boolean) LANGUAGE plpgsql AS $body$BEGIN output_val := true; END$body$;$$
-  , 'Create pg_temp.named_function with named arguments'
-);
-
-SELECT is(
-  :s.routine__arg_names(:s.regprocedure('pg_temp.named_function', 'input_val int, INOUT inout_val text, OUT output_val boolean'))
-  , '{input_val,inout_val}'::text[]
-  , 'Verify routine__arg_names() with named arguments'
-);
-
--- Test routine__arg_names() with no arguments
-SELECT is(
-  :s.routine__arg_names('pg_backend_pid()'::regprocedure)
-  , '{}'::text[]
-  , 'Verify routine__arg_names() with no arguments'
-);
-
--- Test routine__arg_types_text() wrapper
 SELECT is(
   :s.routine__arg_types_text(:s.regprocedure('pg_temp.test_function', :'args'))
   , 'anyarray, pg_class, integer, boolean[]'
@@ -227,7 +202,62 @@ SELECT is(
   , 'Verify routine__arg_types_text() with VARIADIC'
 );
 
--- Test routine__arg_names_text() wrapper
+/*
+ * routine__parse_arg_names / routine__parse_arg_names_text
+ */
+
+SELECT is(
+  :s.routine__parse_arg_names($$IN in_int int, INOUT inout_int_array int[], OUT out_char "char", anyelement, boolean DEFAULT false$$)
+  , '{in_int,inout_int_array,NULL,NULL}'::text[]
+  , 'Verify routine__parse_arg_names() with INOUT and OUT'
+);
+
+SELECT is(
+  :s.routine__parse_arg_names($$IN in_int int, INOUT inout_int_array int[], anyarray, anyelement, boolean DEFAULT false$$)
+  , '{in_int,inout_int_array,NULL,NULL,NULL}'::text[]
+  , 'Verify routine__parse_arg_names() with just INOUT'
+);
+
+SELECT is(
+  :s.routine__parse_arg_names($$IN in_int int, OUT out_char "char", anyarray, anyelement, boolean DEFAULT false$$)
+  , '{in_int,NULL,NULL,NULL}'::text[]
+  , 'Verify routine__parse_arg_names() with just OUT'
+);
+
+SELECT is(
+  :s.routine__parse_arg_names($$anyelement, "char", pg_class, VARIADIC boolean[]$$)
+  , '{NULL,NULL,NULL,NULL}'::text[]
+  , 'Verify routine__parse_arg_names() with only inputs'
+);
+
+\set f routine__parse_arg_names
+SELECT isnt_definer(:'s', :'f', :'_f_args'::name[]);
+
+\set f routine__parse_arg_names_text
+SELECT isnt_definer(:'s', :'f', :'_f_args'::name[]);
+
+/*
+ * routine__arg_names / routine__arg_names_text
+ */
+
+SELECT is(
+  :s.routine__arg_names(:s.regprocedure('pg_temp.test_function', :'args'))
+  , '{NULL,NULL,NULL,NULL}'::text[]
+  , 'Verify routine__arg_names() returns argument names (unnamed function)'
+);
+
+SELECT is(
+  :s.routine__arg_names(:s.regprocedure('pg_temp.named_function', 'input_val int, INOUT inout_val text, OUT output_val boolean'))
+  , '{input_val,inout_val}'::text[]
+  , 'Verify routine__arg_names() with named arguments'
+);
+
+SELECT is(
+  :s.routine__arg_names('pg_backend_pid()'::regprocedure)
+  , '{}'::text[]
+  , 'Verify routine__arg_names() with no arguments'
+);
+
 SELECT is(
   :s.routine__arg_names_text(:s.regprocedure('pg_temp.named_function', 'input_val int, INOUT inout_val text, OUT output_val boolean'))
   , 'input_val, inout_val'
@@ -251,32 +281,6 @@ SELECT is(
   , ''
   , 'Verify routine__arg_names_text() with no arguments'
 );
-
-/*
- * CRITICAL SECURITY TESTS: public routine__ functions must NOT be SECURITY DEFINER.
- * If they were, they could be exploited for SQL injection since they execute
- * dynamic SQL with elevated privileges.
- */
-
-\set f routine__parse_arg_types
-\set args_text 'text'
-SELECT string_to_array(:'args_text', ', ') AS args \gset
-SELECT isnt_definer(:'s', :'f', :'args'::name[]);
-
-\set f routine__parse_arg_names
-\set args_text 'text'
-SELECT string_to_array(:'args_text', ', ') AS args \gset
-SELECT isnt_definer(:'s', :'f', :'args'::name[]);
-
-\set f routine__parse_arg_types_text
-\set args_text 'text'
-SELECT string_to_array(:'args_text', ', ') AS args \gset
-SELECT isnt_definer(:'s', :'f', :'args'::name[]);
-
-\set f routine__parse_arg_names_text
-\set args_text 'text'
-SELECT string_to_array(:'args_text', ', ') AS args \gset
-SELECT isnt_definer(:'s', :'f', :'args'::name[]);
 
 \i test/pgxntool/finish.sql
 

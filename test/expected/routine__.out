@@ -60,33 +60,33 @@ ok 57 - SELECT cat_tools.routine__parallel_safety('u')
 ok 58 - Verify public has no perms
 ok 59 - Verify public has no perms
 ok 60 - Security check should prevent execution when current_user != session_user
-ok 61 - Verify routine__parse_arg_types() with INOUT and OUT
-ok 62 - Verify routine__parse_arg_types() with just INOUT
-ok 63 - Verify routine__parse_arg_types() with just OUT
-ok 64 - Verify routine__parse_arg_types() with only inputs
-ok 65 - Verify routine__parse_arg_names() with INOUT and OUT
-ok 66 - Verify routine__parse_arg_names() with just INOUT
-ok 67 - Verify routine__parse_arg_names() with just OUT
-ok 68 - Verify routine__parse_arg_names() with only inputs
-ok 69 - Create pg_temp.test_function(anyarray, OUT text, OUT "char", pg_class, int, VARIADIC boolean[])
-ok 70 - Verify routine__arg_types() returns all argument types
-ok 71 - Verify routine__arg_types() with IN arguments only
-ok 72 - Verify routine__arg_types() with no arguments
-ok 73 - Verify routine__arg_types() with VARIADIC argument
-ok 74 - Verify routine__arg_names() returns argument names (unnamed function)
-ok 75 - Create pg_temp.named_function with named arguments
-ok 76 - Verify routine__arg_names() with named arguments
-ok 77 - Verify routine__arg_names() with no arguments
-ok 78 - Verify routine__arg_types_text() formatting
-ok 79 - Verify routine__arg_types_text() with simple types
-ok 80 - Verify routine__arg_types_text() with no arguments
-ok 81 - Verify routine__arg_types_text() with VARIADIC
-ok 82 - Verify routine__arg_names_text() formatting
-ok 83 - Verify routine__arg_names_text() with unnamed arguments
-ok 84 - Verify routine__arg_names_text() with built-in function
-ok 85 - Verify routine__arg_names_text() with no arguments
-ok 86 - Function cat_tools.routine__parse_arg_types(text) should not be security definer
-ok 87 - Function cat_tools.routine__parse_arg_names(text) should not be security definer
-ok 88 - Function cat_tools.routine__parse_arg_types_text(text) should not be security definer
-ok 89 - Function cat_tools.routine__parse_arg_names_text(text) should not be security definer
+ok 61 - Create pg_temp.test_function(anyarray, OUT text, OUT "char", pg_class, int, VARIADIC boolean[])
+ok 62 - Create pg_temp.named_function with named arguments
+ok 63 - Verify routine__parse_arg_types() with INOUT and OUT
+ok 64 - Verify routine__parse_arg_types() with just INOUT
+ok 65 - Verify routine__parse_arg_types() with just OUT
+ok 66 - Verify routine__parse_arg_types() with only inputs
+ok 67 - Function cat_tools.routine__parse_arg_types(text) should not be security definer
+ok 68 - Function cat_tools.routine__parse_arg_types_text(text) should not be security definer
+ok 69 - Verify routine__arg_types() returns all argument types
+ok 70 - Verify routine__arg_types() with IN arguments only
+ok 71 - Verify routine__arg_types() with no arguments
+ok 72 - Verify routine__arg_types() with VARIADIC argument
+ok 73 - Verify routine__arg_types_text() formatting
+ok 74 - Verify routine__arg_types_text() with simple types
+ok 75 - Verify routine__arg_types_text() with no arguments
+ok 76 - Verify routine__arg_types_text() with VARIADIC
+ok 77 - Verify routine__parse_arg_names() with INOUT and OUT
+ok 78 - Verify routine__parse_arg_names() with just INOUT
+ok 79 - Verify routine__parse_arg_names() with just OUT
+ok 80 - Verify routine__parse_arg_names() with only inputs
+ok 81 - Function cat_tools.routine__parse_arg_names(text) should not be security definer
+ok 82 - Function cat_tools.routine__parse_arg_names_text(text) should not be security definer
+ok 83 - Verify routine__arg_names() returns argument names (unnamed function)
+ok 84 - Verify routine__arg_names() with named arguments
+ok 85 - Verify routine__arg_names() with no arguments
+ok 86 - Verify routine__arg_names_text() formatting
+ok 87 - Verify routine__arg_names_text() with unnamed arguments
+ok 88 - Verify routine__arg_names_text() with built-in function
+ok 89 - Verify routine__arg_names_text() with no arguments
 # TRANSACTION INTENTIONALLY LEFT OPEN!

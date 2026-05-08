@@ -1,5 +1,5 @@
 \set ECHO none
-1..158
+1..160
 ok 1 - Permission denied trying to execute cat_tools.currval(table_name text, column_name text)
 ok 2 - Permission denied trying to execute cat_tools.enum_range(enum regtype)
 ok 3 - Permission denied trying to execute cat_tools.enum_range_srf(enum regtype)
@@ -158,4 +158,6 @@ ok 155 - Permission granted to use type cat_tools.routine_proparallel
 ok 156 - Permission granted to use type cat_tools.routine_provolatile
 ok 157 - Permission granted to use type cat_tools.routine_type
 ok 158 - Permission granted to use type cat_tools.routine_volatility
+ok 159 - no_use_role has no USAGE on _cat_tools schema
+ok 160 - use_role has USAGE on _cat_tools schema
 # TRANSACTION INTENTIONALLY LEFT OPEN!
