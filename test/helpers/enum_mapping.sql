@@ -1,10 +1,15 @@
 /*
- * Enum mapping helper: tests roundtrip behavior for a pair of "char"-based
- * and human-readable enums.
+ * Enum mapping helper: tests two sets of roundtrip behavior for a pair of
+ * "char"-based and human-readable enums.
  *
- * The two enums should be the same size; greatest() is used to iterate both
- * so that if they ever diverge we get a NULL failure on the extra row rather
- * than silently missing entries.
+ * Set 1 - Sanity checks:
+ *   Verifies both enums are the same size, and that the mapping function
+ *   returns the expected result for the given sample values.
+ *
+ * Set 2 - Full enum coverage:
+ *   For every value in both enums (via _enum_pairs view), verifies the
+ *   mapping function returns the correct result when called with the
+ *   enum type, the "char" type, and a plain text argument.
  *
  * Required variables (set before \i):
  *   s           - schema name (typically already set globally, e.g. cat_tools)
@@ -13,50 +18,60 @@
  *   sample_char - one sample "char" value (e.g. f)
  *   sample_text - expected text result for sample_char (e.g. function)
  *
- * Internal variables built here and unset at end:
- *   f, enum_type, char_enum_type
+ * Internal variables (built here and unset at end):
+ *   __f, __enum_type, __char_enum_type
  */
 SELECT
-    'routine__' || :'kind'            AS f
-  , 'cat_tools.routine_' || :'kind'  AS enum_type
-  , 'cat_tools.routine_' || :'char_col' AS char_enum_type
+    'routine__' || :'kind'               AS __f
+  , 'cat_tools.routine_' || :'kind'     AS __enum_type
+  , 'cat_tools.routine_' || :'char_col' AS __char_enum_type
 \gset
 
 CREATE OR REPLACE TEMP VIEW _enum_pairs AS
   SELECT
-      (cat_tools.enum_range(:'char_enum_type'))[gs]::text AS char_val
-      , (cat_tools.enum_range(:'enum_type'))[gs]::text    AS text_val
+      (cat_tools.enum_range(:'__char_enum_type'))[gs]::text AS char_val
+      , (cat_tools.enum_range(:'__enum_type'))[gs]::text    AS text_val
     FROM generate_series(
       1
       , greatest(
-        array_length(cat_tools.enum_range(:'enum_type'), 1)
-        , array_length(cat_tools.enum_range(:'char_enum_type'), 1)
+        /*
+         * The two enums should be the same size; greatest() is used to
+         * iterate both so that if they ever diverge we get a NULL failure
+         * on the extra row rather than silently missing entries.
+         * The size match is explicitly validated in Set 1 below.
+         */
+        array_length(cat_tools.enum_range(:'__enum_type'), 1)
+        , array_length(cat_tools.enum_range(:'__char_enum_type'), 1)
       )
     ) gs
 ;
 
+-- Set 1: Sanity checks
+
 SELECT is(
-    array_length(cat_tools.enum_range(:'enum_type'), 1)
-    , array_length(cat_tools.enum_range(:'char_enum_type'), 1)
-    , 'Verify count from ' || :'kind'
+    array_length(cat_tools.enum_range(:'__enum_type'), 1)
+    , array_length(cat_tools.enum_range(:'__char_enum_type'), 1)
+    , 'Verify ' || :'kind' || ' and ' || :'char_col' || ' enums have same size'
   );
 
 SELECT is(
     :s.routine__:kind(:'sample_char')
     , :'sample_text'
-    , 'Simple sanity check of ' || :'f' || '()'
+    , 'Simple sanity check of ' || :'__f' || '()'
   );
 
 SELECT is(
-    :s.routine__:kind(:'sample_char':::char_enum_type)
+    :s.routine__:kind(:'sample_char':::__char_enum_type)
     , :'sample_text'
-    , 'Simple sanity check of ' || :'f' || '() with enum'
+    , 'Simple sanity check of ' || :'__f' || '() with enum'
   );
 
+-- Set 2: Full enum coverage
+
 SELECT is(
-    :s.routine__:kind(char_val:::char_enum_type)::text
+    :s.routine__:kind(char_val:::__char_enum_type)::text
     , text_val
-    , format('SELECT ' || :'s' || '.' || :'f' || '(%L::' || :'char_enum_type' || ')', char_val)
+    , format('SELECT ' || :'s' || '.' || :'__f' || '(%L::' || :'__char_enum_type' || ')', char_val)
   )
   FROM _enum_pairs
 ;
@@ -64,7 +79,7 @@ SELECT is(
 SELECT is(
     :s.routine__:kind(char_val::"char")::text
     , text_val
-    , format('SELECT ' || :'s' || '.' || :'f' || '(%L::"char")', char_val)
+    , format('SELECT ' || :'s' || '.' || :'__f' || '(%L::"char")', char_val)
   )
   FROM _enum_pairs
 ;
@@ -72,17 +87,13 @@ SELECT is(
 SELECT is(
     :s.routine__:kind(char_val::"char")::text
     , text_val
-    , format('SELECT ' || :'s' || '.' || :'f' || '(%L)', char_val)
+    , format('SELECT ' || :'s' || '.' || :'__f' || '(%L)', char_val)
   )
   FROM _enum_pairs
 ;
 
-\unset f
-\unset enum_type
-\unset char_enum_type
-\unset kind
-\unset char_col
-\unset sample_char
-\unset sample_text
+\unset __f
+\unset __enum_type
+\unset __char_enum_type
 
 -- vi: expandtab ts=2 sw=2

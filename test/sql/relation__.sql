@@ -24,13 +24,11 @@ CREATE TEMP VIEW kinds AS
     ) gs
 ;
 
-CREATE TEMP TABLE temp_test_table(col1 int, col2 text, col3 boolean, col4 timestamp, col5 numeric);
-
 SELECT plan(
   (1 + 2 + 2 * (SELECT count(*)::int FROM kinds)) -- relation_type enum mapping
-  + 3 -- relation__is_temp
-  + 3 -- relation__is_catalog
-  + 6 -- relation__column_names
+  + 5 -- relation__is_temp
+  + 5 -- relation__is_catalog
+  + 8 -- relation__column_names
 );
 
 -- relation_type enum mapping
@@ -60,14 +58,33 @@ SELECT is(cat_tools.relation__kind(relkind)::text, kind, format('SELECT cat_tool
 ;
 
 -- relation__is_temp
+\set f relation__is_temp
+
+SET LOCAL ROLE :no_use_role;
+
+SELECT throws_ok(
+  format(
+    $$SELECT %I.%I( %L )$$
+    , :'s', :'f'
+    , 'pg_catalog.pg_class'
+  )
+  , '42501'
+  , NULL
+  , 'Verify public has no perms'
+);
+
+SET LOCAL ROLE :use_role;
+
 SELECT is(
   cat_tools.relation__is_temp('pg_catalog.pg_class'::regclass)
   , false
   , 'pg_catalog.pg_class is not a temp relation'
 );
 
+SELECT lives_ok($$CREATE TEMP TABLE is_temp_test()$$, 'Create temp table for testing');
+
 SELECT is(
-  cat_tools.relation__is_temp('temp_test_table'::regclass)
+  cat_tools.relation__is_temp('is_temp_test'::regclass)
   , true
   , 'temp relation is correctly identified as temp'
 );
@@ -79,14 +96,33 @@ SELECT is(
 );
 
 -- relation__is_catalog
+\set f relation__is_catalog
+
+SET LOCAL ROLE :no_use_role;
+
+SELECT throws_ok(
+  format(
+    $$SELECT %I.%I( %L )$$
+    , :'s', :'f'
+    , 'pg_catalog.pg_class'
+  )
+  , '42501'
+  , NULL
+  , 'Verify public has no perms'
+);
+
+SET LOCAL ROLE :use_role;
+
 SELECT is(
   cat_tools.relation__is_catalog('pg_catalog.pg_class'::regclass)
   , true
   , 'pg_catalog.pg_class is in pg_catalog schema'
 );
 
+SELECT lives_ok($$CREATE TEMP TABLE is_catalog_test()$$, 'Create temp table for testing');
+
 SELECT is(
-  cat_tools.relation__is_catalog('temp_test_table'::regclass)
+  cat_tools.relation__is_catalog('is_catalog_test'::regclass)
   , false
   , 'temp relation is not in pg_catalog schema'
 );
@@ -98,6 +134,25 @@ SELECT is(
 );
 
 -- relation__column_names
+\set f relation__column_names
+
+SET LOCAL ROLE :no_use_role;
+
+SELECT throws_ok(
+  format(
+    $$SELECT %I.%I( %L )$$
+    , :'s', :'f'
+    , 'temp_test_table'
+  )
+  , '42501'
+  , NULL
+  , 'Verify public has no perms'
+);
+
+SET LOCAL ROLE :use_role;
+
+SELECT lives_ok($$CREATE TEMP TABLE temp_test_table(col1 int, col2 text, col3 boolean, col4 timestamp, col5 numeric)$$, 'Create temp table with multiple columns');
+
 SELECT is(
   cat_tools.relation__column_names('temp_test_table'::regclass)
   , '{col1,col2,col3,col4,col5}'::text[]

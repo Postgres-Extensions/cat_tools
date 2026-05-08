@@ -11,7 +11,17 @@ SELECT plan(
   + (1 + 2 + 3 * array_length(cat_tools.enum_range('cat_tools.routine_argument_mode'), 1))
   + (1 + 2 + 3 * array_length(cat_tools.enum_range('cat_tools.routine_volatility'), 1))
   + (1 + 2 + 3 * array_length(cat_tools.enum_range('cat_tools.routine_parallel_safety'), 1))
-  + 32 -- routine__parse_arg_*, routine__arg_*, and security definer checks for routine__ callers
+  + 2  -- no_use_role access denied for parse helpers (throws_ok via func_calls)
+  + 1  -- security check when current_user != session_user
+  + 4  -- routine__parse_arg_types() with various arg combinations
+  + 4  -- routine__parse_arg_names() with various arg combinations
+  + 1  -- create pg_temp.test_function
+  + 4  -- routine__arg_types() return values
+  + 1  -- create pg_temp.named_function
+  + 3  -- routine__arg_names() return values
+  + 4  -- routine__arg_types_text() formatting
+  + 4  -- routine__arg_names_text() formatting
+  + 4  -- isnt_definer security checks for public routine__ callers
 );
 
 \set kind        type

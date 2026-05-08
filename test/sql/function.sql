@@ -3,6 +3,7 @@
 \i test/setup.sql
 
 \set s cat_tools
+\set _s _cat_tools
 
 SELECT plan(
     2 -- security definer checks for _cat_tools helpers
@@ -19,12 +20,12 @@ SELECT plan(
 \set f function__arg_to_regprocedure
 \set args_text 'text, text, text'
 SELECT string_to_array(:'args_text', ', ') AS args \gset
-SELECT isnt_definer('_cat_tools', :'f', :'args'::name[]);
+SELECT isnt_definer(:'_s', :'f', :'args'::name[]);
 
 \set f function__drop_temp
 \set args_text 'regprocedure, text'
 SELECT string_to_array(:'args_text', ', ') AS args \gset
-SELECT isnt_definer('_cat_tools', :'f', :'args'::name[]);
+SELECT isnt_definer(:'_s', :'f', :'args'::name[]);
 
 /*
  * Deprecated wrappers call through to routine__parse_arg_types, which has a

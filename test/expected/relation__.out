@@ -1,5 +1,5 @@
 \set ECHO none
-1..35
+1..41
 ok 1 - Verify count from kinds
 ok 2 - Simple sanity check of relation__kind()
 ok 3 - Simple sanity check of relation__relkind()
@@ -23,16 +23,22 @@ ok 20 - SELECT cat_tools.relation_type('f')
 ok 21 - SELECT cat_tools.relation_type('m')
 ok 22 - SELECT cat_tools.relation_type('p')
 ok 23 - SELECT cat_tools.relation_type('I')
-ok 24 - pg_catalog.pg_class is not a temp relation
-ok 25 - temp relation is correctly identified as temp
-ok 26 - NULL input returns NULL (STRICT function)
-ok 27 - pg_catalog.pg_class is in pg_catalog schema
-ok 28 - temp relation is not in pg_catalog schema
-ok 29 - NULL input returns NULL (STRICT function)
-ok 30 - Temp table returns expected column names
-ok 31 - Drop middle column from temp table
-ok 32 - Temp table with dropped column returns expected column names
-ok 33 - Create test table with columns
-ok 34 - Test table returns expected column names
-ok 35 - NULL input returns NULL (STRICT function)
+ok 24 - Verify public has no perms
+ok 25 - pg_catalog.pg_class is not a temp relation
+ok 26 - Create temp table for testing
+ok 27 - temp relation is correctly identified as temp
+ok 28 - NULL input returns NULL (STRICT function)
+ok 29 - Verify public has no perms
+ok 30 - pg_catalog.pg_class is in pg_catalog schema
+ok 31 - Create temp table for testing
+ok 32 - temp relation is not in pg_catalog schema
+ok 33 - NULL input returns NULL (STRICT function)
+ok 34 - Verify public has no perms
+ok 35 - Create temp table with multiple columns
+ok 36 - Temp table returns expected column names
+ok 37 - Drop middle column from temp table
+ok 38 - Temp table with dropped column returns expected column names
+ok 39 - Create test table with columns
+ok 40 - Test table returns expected column names
+ok 41 - NULL input returns NULL (STRICT function)
 # TRANSACTION INTENTIONALLY LEFT OPEN!
