@@ -81,12 +81,9 @@ SELECT lives_ok(
  * _cat_tools schema access checks.
  *
  * Schema-level USAGE is the primary barrier: no_use_role cannot resolve any
- * object name in _cat_tools, making its functions effectively private even
- * though function__arg_to_regprocedure and function__drop_temp carry an
- * incidental PUBLIC execute grant in their ACLs (materialized when GRANT TO
- * cat_tools__usage ran without a preceding REVOKE FROM PUBLIC).  A
- * defense-in-depth fix would add explicit REVOKE EXECUTE FROM PUBLIC for
- * those two functions in the source.
+ * object name in _cat_tools, making its functions effectively private.
+ * function__arg_to_regprocedure and function__drop_temp also have explicit
+ * REVOKE EXECUTE FROM PUBLIC for defense in depth.
  */
 SELECT is(
     has_schema_privilege(:'no_use_role', '_cat_tools', 'USAGE')

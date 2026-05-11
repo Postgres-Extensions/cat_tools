@@ -251,7 +251,9 @@ END
 $body$;
 
 GRANT USAGE ON SCHEMA _cat_tools TO cat_tools__usage;
+REVOKE EXECUTE ON FUNCTION _cat_tools.function__arg_to_regprocedure(text, text, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION _cat_tools.function__arg_to_regprocedure(text, text, text) TO cat_tools__usage;
+REVOKE EXECUTE ON FUNCTION _cat_tools.function__drop_temp(pg_catalog.regprocedure, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION _cat_tools.function__drop_temp(pg_catalog.regprocedure, text) TO cat_tools__usage;
 
 @generated@
