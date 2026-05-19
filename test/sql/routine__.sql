@@ -81,10 +81,10 @@ SELECT throws_ok(
  */
 SET LOCAL ROLE :use_role;
 SELECT throws_ok(
-  $$SELECT cat_tools.routine__parse_arg_types('int')$$,
-  '28000',
-  'potential use of SECURITY DEFINER detected',
-  'Security check should prevent execution when current_user != session_user'
+  $$SELECT cat_tools.routine__parse_arg_types('int')$$
+  , '28000'
+  , 'potential use of SECURITY DEFINER detected'
+  , 'Security check should prevent execution when current_user != session_user'
 );
 
 /*
@@ -93,21 +93,6 @@ SELECT throws_ok(
  * run under this authorization.
  */
 SET SESSION AUTHORIZATION :use_role;
-
--- Create pg_temp test functions now that we have a stable session_user.
-\set args 'anyarray, OUT text, OUT "char", pg_class, int, VARIADIC boolean[]'
-SELECT lives_ok(
-  format(
-    $$CREATE FUNCTION pg_temp.test_function(%s) LANGUAGE plpgsql AS $body$BEGIN NULL; END$body$;$$
-    , :'args'
-  )
-  , format('Create pg_temp.test_function(%s)', :'args')
-);
-
-SELECT lives_ok(
-  $$CREATE FUNCTION pg_temp.named_function(input_val int, INOUT inout_val text, OUT output_val boolean) LANGUAGE plpgsql AS $body$BEGIN output_val := true; END$body$;$$
-  , 'Create pg_temp.named_function with named arguments'
-);
 
 /*
  * routine__parse_arg_types / routine__parse_arg_types_text
@@ -149,6 +134,28 @@ SELECT isnt_definer(:'s', :'f', :'_f_args'::name[]);
 
 \set f routine__parse_arg_types_text
 SELECT isnt_definer(:'s', :'f', :'_f_args'::name[]);
+
+/*
+ * Create pg_temp test functions now that we have a stable session_user.
+ * These are used by the routine__arg_types and routine__arg_names tests below.
+ */
+\set args 'anyarray, OUT text, OUT "char", pg_class, int, VARIADIC boolean[]'
+\set named_args 'input_val int, INOUT inout_val text, OUT output_val boolean'
+SELECT lives_ok(
+  format(
+    $$CREATE FUNCTION pg_temp.test_function(%s) LANGUAGE plpgsql AS $body$BEGIN NULL; END$body$;$$
+    , :'args'
+  )
+  , format('Create pg_temp.test_function(%s)', :'args')
+);
+
+SELECT lives_ok(
+  format(
+    $$CREATE FUNCTION pg_temp.named_function(%s) LANGUAGE plpgsql AS $body$BEGIN output_val := true; END$body$;$$
+    , :'named_args'
+  )
+  , format('Create pg_temp.named_function(%s)', :'named_args')
+);
 
 /*
  * routine__arg_types / routine__arg_types_text
@@ -247,7 +254,7 @@ SELECT is(
 );
 
 SELECT is(
-  :s.routine__arg_names(:s.regprocedure('pg_temp.named_function', 'input_val int, INOUT inout_val text, OUT output_val boolean'))
+  :s.routine__arg_names(:s.regprocedure('pg_temp.named_function', :'named_args'))
   , '{input_val,inout_val}'::text[]
   , 'Verify routine__arg_names() with named arguments'
 );
@@ -259,7 +266,7 @@ SELECT is(
 );
 
 SELECT is(
-  :s.routine__arg_names_text(:s.regprocedure('pg_temp.named_function', 'input_val int, INOUT inout_val text, OUT output_val boolean'))
+  :s.routine__arg_names_text(:s.regprocedure('pg_temp.named_function', :'named_args'))
   , 'input_val, inout_val'
   , 'Verify routine__arg_names_text() formatting'
 );
