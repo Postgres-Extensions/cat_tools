@@ -2,7 +2,9 @@
 
 ## GitHub CI
 
-After pushing to a branch with an open PR, monitor CI using `gh pr checks --watch` in a background subagent until all jobs pass or a failure is confirmed. Investigate and fix failures immediately rather than leaving them for the user to notice.
+After **every** push, monitor GitHub CI in a background subagent until all jobs pass or a failure is confirmed. Use `gh pr checks <pr> --watch` when the branch has an open PR; otherwise (a branch with no PR yet, or a push to `master`) use `gh run watch` for the pushed commit. Investigate and fix failures immediately rather than leaving them for the user to notice.
+
+(Docs-only pushes — `**.md`/`**.asc` — are excluded from CI by `paths-ignore` in `.github/workflows/ci.yml`, so there will be no run to watch for those.)
 
 ## Bug Fixes
 
