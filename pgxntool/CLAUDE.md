@@ -188,9 +188,10 @@ When tests fail, examine the diff output carefully. The actual test output in `t
 - Validates repo is clean before tagging
 
 ### Subtree Sync Support
-- `make pgxntool-sync` pulls latest release
-- Multiple sync targets: release, stable, local variants
-- Uses `git subtree pull --squash`
+- `make pgxntool-sync` pulls the latest release (the `release` tag) from the canonical repo
+- `pgxntool/pgxntool-sync.sh [<repo> [<ref>]]` does the work and can be run without make
+- `make pgxntool-sync-<name>` pulls from the `pgxntool-sync-<name>` variable (`<repo> <ref>`)
+- Uses `git subtree pull --squash`, then `update-setup-files.sh` for a 3-way merge of copied files
 - Requires clean repo (no uncommitted changes)
 
 ### pg_tle Support

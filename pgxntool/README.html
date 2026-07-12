@@ -926,7 +926,7 @@ Part of the <code>clean</code> recipe is cleaning up these .zip files. If you ac
 <div class="sect2">
 <h3 id="_pgxntool_sync"><a class="anchor" href="#_pgxntool_sync"></a><a class="link" href="#_pgxntool_sync">4.9. pgxntool-sync</a></h3>
 <div class="paragraph">
-<p>This rule will pull down the latest released version of PGXNtool via <code>git subtree pull</code>.</p>
+<p>This rule will pull down the latest released version of PGXNtool via <code>git subtree pull</code> and then reconcile the files <code>setup.sh</code> copied into your project (<code>.gitignore</code>, <code>test/deps.sql</code>) with a 3-way merge.</p>
 </div>
 <div class="admonitionblock note">
 <table>
@@ -947,7 +947,19 @@ Your repository must be clean (no modified files) in order to run this. Running 
 <div class="title">Tip</div>
 </td>
 <td class="content">
-There is also a <code>pgxntool-sync-%</code> rule if you need to do more advanced things.
+The actual work is done by <code>pgxntool/pgxntool-sync.sh</code>, so you can run it directly (<code>pgxntool/pgxntool-sync.sh</code>) if you&#8217;d rather not go through <code>make</code>. It optionally takes <code>&lt;repo&gt;</code> and <code>&lt;ref&gt;</code> arguments to pull from somewhere other than the default.
+</td>
+</tr>
+</table>
+</div>
+<div class="admonitionblock tip">
+<table>
+<tr>
+<td class="icon">
+<div class="title">Tip</div>
+</td>
+<td class="content">
+There is also a <code>pgxntool-sync-%</code> rule if you need to do more advanced things. <code>make pgxntool-sync-&lt;name&gt;</code> pulls from the <code>&lt;repo&gt; &lt;ref&gt;</code> defined by the <code>pgxntool-sync-&lt;name&gt;</code> make variable.
 </td>
 </tr>
 </table>
