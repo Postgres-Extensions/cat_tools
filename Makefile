@@ -26,6 +26,20 @@ all: $B/cat_tools.sql $(versioned_out)
 installcheck: $B/cat_tools.sql $(versioned_out)
 EXTRA_CLEAN += $B/cat_tools.sql $(versioned_out)
 
+# Generate the canonical set of pg_class.relkind values from the server headers
+# we are building against, for the relkind drift check in test/sql/relation__.sql.
+# Regenerated on every test run so it always tracks the active PostgreSQL
+# version; the output is gitignored (per-version). When postgresql-server-dev-NN
+# is not installed the script emits a skip sentinel so `make test` still works.
+RELKIND_SRC = test/generated/pg_class_relkinds.sql
+.PHONY: gen-relkinds
+gen-relkinds: test/gen-relkinds.sh | test/generated
+	test/gen-relkinds.sh "$$($(PG_CONFIG) --includedir-server)/catalog/pg_class.h" > $(RELKIND_SRC)
+test/generated:
+	@mkdir -p $@
+testdeps: gen-relkinds
+EXTRA_CLEAN += $(RELKIND_SRC)
+
 # Temporary ugly hack for 9.x — remove these two blocks when 9.x support is dropped.
 # $@ is deferred via = and expands to the target name at recipe time.
 ifeq ($(LT95),yes)

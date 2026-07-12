@@ -42,6 +42,7 @@ SELECT plan(
   + 5 -- relation__is_temp
   + 5 -- relation__is_catalog
   + 8 -- relation__column_names
+  + 1 -- relkind drift check vs pg_class.h
 );
 
 -- relation_type enum mapping
@@ -69,6 +70,34 @@ SELECT is(cat_tools.relation__relkind(kind)::text, relkind, format('SELECT cat_t
 SELECT is(cat_tools.relation__kind(relkind)::text, kind, format('SELECT cat_tools.relation_type(%L)', relkind))
   FROM kinds
 ;
+
+/*
+ * Drift check: compare the hard-coded relkind data set above (`kinds`) against
+ * the relkinds the PostgreSQL we are built against actually defines.
+ * test/gen-relkinds.sh (run by `make`) extracts every RELKIND_* value from the
+ * server's pg_class.h into pg_class_relkind_source. Any relkind present in
+ * pg_class.h but absent from `kinds` means PostgreSQL added (or renamed) a
+ * relkind this extension does not handle yet -- fail so we notice and update
+ * the enum, the mapping functions, and `kinds`. The reverse (a relkind in
+ * `kinds` that an older PostgreSQL lacks) is fine and intentionally ignored.
+ *
+ * Output is stable: string_agg over zero unknown relkinds is NULL, so the
+ * assertion passes with the same TAP line on every supported PG version. When
+ * the server headers are unavailable pg_class_relkind_source is empty (see
+ * gen-relkinds.sh), which yields the same NULL/pass -- so `make test` produces
+ * identical output with or without postgresql-server-dev-NN installed.
+ */
+\i test/generated/pg_class_relkinds.sql
+
+SELECT is(
+  (
+    SELECT string_agg(src.relkind || ' (' || src.macro || ')', ', ' ORDER BY src.relkind)
+      FROM pg_class_relkind_source AS src
+      WHERE src.relkind NOT IN (SELECT relkind FROM kinds)
+  )
+  , NULL
+  , 'pg_class.h defines no relkind missing from this test''s data set'
+);
 
 -- relation__is_temp
 \set f relation__is_temp

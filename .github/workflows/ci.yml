@@ -25,8 +25,11 @@ jobs:
         run: pg-start ${{ matrix.pg }}
       - name: Check out the repo
         uses: actions/checkout@v6
-      - name: Install rsync
-        run: apt-get install -y rsync
+      - name: Install rsync and server headers
+        # postgresql-server-dev-NN provides catalog/pg_class.h, which
+        # test/gen-relkinds.sh reads for the relkind drift check in
+        # test/sql/relation__.sql. Without it that check skips itself.
+        run: apt-get install -y rsync postgresql-server-dev-${{ matrix.pg }}
       - name: Test on PostgreSQL ${{ matrix.pg }}
         run: |
           make test
