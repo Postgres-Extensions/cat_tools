@@ -374,15 +374,21 @@ SELECT __cat_tools.create_function(
   , 'relkind cat_tools.relation_relkind'
   , 'cat_tools.relation_type LANGUAGE sql STRICT IMMUTABLE'
   , $body$
+/*
+ * The c/f/m arms were previously mapped backwards (c->materialized view,
+ * f->composite type, m->foreign table), disagreeing with pg_class.relkind
+ * semantics documented in src/include/catalog/pg_class.h. Correct mapping is
+ * c=composite type, f=foreign table, m=materialized view.
+ */
 SELECT CASE relkind
   WHEN 'r' THEN 'table'
   WHEN 'i' THEN 'index'
   WHEN 'S' THEN 'sequence'
   WHEN 't' THEN 'toast table'
   WHEN 'v' THEN 'view'
-  WHEN 'c' THEN 'materialized view' -- composite type (but mapped to materialized view)
-  WHEN 'f' THEN 'composite type' -- foreign table (but mapped to composite type)
-  WHEN 'm' THEN 'foreign table' -- materialized view (but mapped to foreign table)
+  WHEN 'c' THEN 'composite type'
+  WHEN 'f' THEN 'foreign table'
+  WHEN 'm' THEN 'materialized view'
   WHEN 'p' THEN 'partitioned table'
   WHEN 'I' THEN 'partitioned index'
 END::cat_tools.relation_type
@@ -396,15 +402,22 @@ SELECT __cat_tools.create_function(
   , 'kind cat_tools.relation_type'
   , 'cat_tools.relation_relkind LANGUAGE sql STRICT IMMUTABLE'
   , $body$
+/*
+ * The composite type / foreign table / materialized view arms were previously
+ * mapped backwards (composite type->f, foreign table->m, materialized view->c),
+ * disagreeing with pg_class.relkind semantics documented in
+ * src/include/catalog/pg_class.h. Correct mapping is composite type=c,
+ * foreign table=f, materialized view=m.
+ */
 SELECT CASE kind
   WHEN 'table' THEN 'r'
   WHEN 'index' THEN 'i'
   WHEN 'sequence' THEN 'S'
   WHEN 'toast table' THEN 't'
   WHEN 'view' THEN 'v'
-  WHEN 'materialized view' THEN 'c' -- materialized view (mapped from c)
-  WHEN 'composite type' THEN 'f' -- composite type (mapped from f)
-  WHEN 'foreign table' THEN 'm' -- foreign table (mapped from m)
+  WHEN 'composite type' THEN 'c'
+  WHEN 'foreign table' THEN 'f'
+  WHEN 'materialized view' THEN 'm'
   WHEN 'partitioned table' THEN 'p'
   WHEN 'partitioned index' THEN 'I'
 END::cat_tools.relation_relkind

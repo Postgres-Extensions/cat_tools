@@ -165,7 +165,16 @@ $body$;
 
 -- https://github.com/jnasbyupgrade/cat_tools/blob/new_functions/sql/cat_tools.sql.in#L254
 GRANT USAGE ON SCHEMA _cat_tools TO cat_tools__usage;
+/*
+ * These _cat_tools helper functions are created with a bare CREATE FUNCTION
+ * (not via __cat_tools.create_function, whose revoke_template already strips
+ * PUBLIC), so their default ACL still grants EXECUTE to PUBLIC. Revoke PUBLIC
+ * before granting cat_tools__usage so a database updated from 0.2.2 ends up
+ * with the same ACLs as a fresh 0.3.0 install (see cat_tools.sql.in).
+ */
+REVOKE EXECUTE ON FUNCTION _cat_tools.function__arg_to_regprocedure(text, text, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION _cat_tools.function__arg_to_regprocedure(text, text, text) TO cat_tools__usage;
+REVOKE EXECUTE ON FUNCTION _cat_tools.function__drop_temp(pg_catalog.regprocedure, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION _cat_tools.function__drop_temp(pg_catalog.regprocedure, text) TO cat_tools__usage;
 
 -- https://github.com/jnasbyupgrade/cat_tools/blob/new_functions/sql/cat_tools.sql.in#L280
@@ -253,15 +262,21 @@ SELECT __cat_tools.create_function(
   , 'relkind cat_tools.relation_relkind'
   , 'cat_tools.relation_type LANGUAGE sql STRICT IMMUTABLE'
   , $body$
+/*
+ * The c/f/m arms were previously mapped backwards (c->materialized view,
+ * f->composite type, m->foreign table), disagreeing with pg_class.relkind
+ * semantics documented in src/include/catalog/pg_class.h. Correct mapping is
+ * c=composite type, f=foreign table, m=materialized view.
+ */
 SELECT CASE relkind
   WHEN 'r' THEN 'table'
   WHEN 'i' THEN 'index'
   WHEN 'S' THEN 'sequence'
   WHEN 't' THEN 'toast table'
   WHEN 'v' THEN 'view'
-  WHEN 'c' THEN 'materialized view'
-  WHEN 'f' THEN 'composite type'
-  WHEN 'm' THEN 'foreign table'
+  WHEN 'c' THEN 'composite type'
+  WHEN 'f' THEN 'foreign table'
+  WHEN 'm' THEN 'materialized view'
   WHEN 'p' THEN 'partitioned table'
   WHEN 'I' THEN 'partitioned index'
 END::cat_tools.relation_type
@@ -276,15 +291,22 @@ SELECT __cat_tools.create_function(
   , 'kind cat_tools.relation_type'
   , 'cat_tools.relation_relkind LANGUAGE sql STRICT IMMUTABLE'
   , $body$
+/*
+ * The composite type / foreign table / materialized view arms were previously
+ * mapped backwards (composite type->f, foreign table->m, materialized view->c),
+ * disagreeing with pg_class.relkind semantics documented in
+ * src/include/catalog/pg_class.h. Correct mapping is composite type=c,
+ * foreign table=f, materialized view=m.
+ */
 SELECT CASE kind
   WHEN 'table' THEN 'r'
   WHEN 'index' THEN 'i'
   WHEN 'sequence' THEN 'S'
   WHEN 'toast table' THEN 't'
   WHEN 'view' THEN 'v'
-  WHEN 'materialized view' THEN 'c'
-  WHEN 'composite type' THEN 'f'
-  WHEN 'foreign table' THEN 'm'
+  WHEN 'composite type' THEN 'c'
+  WHEN 'foreign table' THEN 'f'
+  WHEN 'materialized view' THEN 'm'
   WHEN 'partitioned table' THEN 'p'
   WHEN 'partitioned index' THEN 'I'
 END::cat_tools.relation_relkind

@@ -7,21 +7,34 @@
 SET LOCAL ROLE :use_role;
 
 /*
- * The two enums should be the same size; we use greatest() to iterate over
- * both so that if they ever diverge we will get a NULL failure rather than
- * silently missing entries.
+ * Canonical pg_class.relkind -> cat_tools.relation_type mapping.
+ *
+ * These pairs are the ground truth per PostgreSQL's documented pg_class.relkind
+ * semantics (src/include/catalog/pg_class.h RELKIND_* constants), and were
+ * verified against the live catalog by creating one object of each kind and
+ * reading back pg_class.relkind.
+ *
+ * They are hard-coded here on purpose. A previous version of this test built
+ * `kinds` by positionally zipping enum_range('relation_type') against
+ * enum_range('relation_relkind') and then asserted the mapping functions agreed
+ * with that zip. Because the functions were written to the same positional
+ * pairing, the test was tautological: an internally-consistent-but-wrong
+ * mapping (e.g. c<->materialized view, f<->composite type, m<->foreign table
+ * swapped) still passed. Asserting against these literal pairs makes the test
+ * fail if the mapping is ever backwards.
  */
-CREATE TEMP VIEW kinds AS
-  SELECT
-      (cat_tools.enum_range('cat_tools.relation_type'))[gs]    AS kind
-      , (cat_tools.enum_range('cat_tools.relation_relkind'))[gs] AS relkind
-    FROM generate_series(
-      1
-      , greatest(
-        array_upper(cat_tools.enum_range('cat_tools.relation_type'), 1)
-        , array_upper(cat_tools.enum_range('cat_tools.relation_relkind'), 1)
-      )
-    ) gs
+CREATE TEMP VIEW kinds (relkind, kind) AS
+  VALUES
+      ('r'::text, 'table'::text)
+    , ('i', 'index')
+    , ('S', 'sequence')
+    , ('t', 'toast table')
+    , ('v', 'view')
+    , ('c', 'composite type')
+    , ('f', 'foreign table')
+    , ('m', 'materialized view')
+    , ('p', 'partitioned table')
+    , ('I', 'partitioned index')
 ;
 
 SELECT plan(
