@@ -161,11 +161,20 @@ $body$;
 
 @generated@
 
-CREATE FUNCTION _cat_tools.function__arg_to_regprocedure(
-  arguments text
-  , function_suffix text
-  , api_function_name text
-) RETURNS pg_catalog.regprocedure LANGUAGE plpgsql AS $body$
+/*
+ * These _cat_tools helper functions are created via __cat_tools.create_function
+ * so that the REVOKE-from-PUBLIC + GRANT-to-cat_tools__usage is applied
+ * uniformly and cannot drift from the update script (a hand-written REVOKE was
+ * previously forgotten there). At this point cat_tools.routine__parse_arg_types_text
+ * is still the pass-through stub, so create_function's generated REVOKE/GRANT
+ * carry the argument names rather than bare types; that is harmless because
+ * PostgreSQL ignores argument names when matching a function signature.
+ */
+SELECT __cat_tools.create_function(
+  '_cat_tools.function__arg_to_regprocedure'
+  , 'arguments text, function_suffix text, api_function_name text'
+  , 'pg_catalog.regprocedure LANGUAGE plpgsql'
+  , $body$
 DECLARE
   /*
    * Template for creating a temporary function with the user-provided argument
@@ -227,12 +236,15 @@ BEGIN
 
   RETURN temp_proc;
 END
-$body$;
+$body$
+  , 'cat_tools__usage'
+);
 
-CREATE FUNCTION _cat_tools.function__drop_temp(
-  p_regprocedure pg_catalog.regprocedure
-  , api_function_name text
-) RETURNS void LANGUAGE plpgsql AS $body$
+SELECT __cat_tools.create_function(
+  '_cat_tools.function__drop_temp'
+  , 'p_regprocedure pg_catalog.regprocedure, api_function_name text'
+  , 'void LANGUAGE plpgsql'
+  , $body$
 BEGIN
   /*
    * Security check: Ensure current_user == session_user to detect SECURITY DEFINER context
@@ -248,13 +260,11 @@ BEGIN
 
   EXECUTE 'DROP ROUTINE ' || p_regprocedure;
 END
-$body$;
+$body$
+  , 'cat_tools__usage'
+);
 
 GRANT USAGE ON SCHEMA _cat_tools TO cat_tools__usage;
-REVOKE EXECUTE ON FUNCTION _cat_tools.function__arg_to_regprocedure(text, text, text) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION _cat_tools.function__arg_to_regprocedure(text, text, text) TO cat_tools__usage;
-REVOKE EXECUTE ON FUNCTION _cat_tools.function__drop_temp(pg_catalog.regprocedure, text) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION _cat_tools.function__drop_temp(pg_catalog.regprocedure, text) TO cat_tools__usage;
 
 @generated@
 

@@ -94,11 +94,11 @@ $body$;
 -- They are part of the 0.2.1→0.2.2 upgrade.
 
 -- https://github.com/jnasbyupgrade/cat_tools/blob/new_functions/sql/cat_tools.sql.in#L165
-CREATE FUNCTION _cat_tools.function__arg_to_regprocedure(
-  arguments text
-  , function_suffix text
-  , api_function_name text
-) RETURNS pg_catalog.regprocedure LANGUAGE plpgsql AS $body$
+SELECT __cat_tools.create_function(
+  '_cat_tools.function__arg_to_regprocedure'
+  , 'arguments text, function_suffix text, api_function_name text'
+  , 'pg_catalog.regprocedure LANGUAGE plpgsql'
+  , $body$
 DECLARE
   c_template CONSTANT text := $fmt$CREATE FUNCTION pg_temp.cat_tools__function__%s__temp_function(
     %s
@@ -143,13 +143,16 @@ BEGIN
 
   RETURN temp_proc;
 END
-$body$;
+$body$
+  , 'cat_tools__usage'
+);
 
 -- https://github.com/jnasbyupgrade/cat_tools/blob/new_functions/sql/cat_tools.sql.in#L233
-CREATE FUNCTION _cat_tools.function__drop_temp(
-  p_regprocedure pg_catalog.regprocedure
-  , api_function_name text
-) RETURNS void LANGUAGE plpgsql AS $body$
+SELECT __cat_tools.create_function(
+  '_cat_tools.function__drop_temp'
+  , 'p_regprocedure pg_catalog.regprocedure, api_function_name text'
+  , 'void LANGUAGE plpgsql'
+  , $body$
 BEGIN
   IF current_user != session_user THEN
     RAISE EXCEPTION USING
@@ -161,21 +164,17 @@ BEGIN
 
   EXECUTE 'DROP ROUTINE ' || p_regprocedure;
 END
-$body$;
+$body$
+  , 'cat_tools__usage'
+);
 
 -- https://github.com/jnasbyupgrade/cat_tools/blob/new_functions/sql/cat_tools.sql.in#L254
-GRANT USAGE ON SCHEMA _cat_tools TO cat_tools__usage;
 /*
- * These _cat_tools helper functions are created with a bare CREATE FUNCTION
- * (not via __cat_tools.create_function, whose revoke_template already strips
- * PUBLIC), so their default ACL still grants EXECUTE to PUBLIC. Revoke PUBLIC
- * before granting cat_tools__usage so a database updated from 0.2.2 ends up
- * with the same ACLs as a fresh 0.3.0 install (see cat_tools.sql.in).
+ * Both helpers above are created via __cat_tools.create_function, which applies
+ * the REVOKE-from-PUBLIC + GRANT-to-cat_tools__usage automatically (and keeps it
+ * in sync with the fresh-install script). Only the schema USAGE grant remains.
  */
-REVOKE EXECUTE ON FUNCTION _cat_tools.function__arg_to_regprocedure(text, text, text) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION _cat_tools.function__arg_to_regprocedure(text, text, text) TO cat_tools__usage;
-REVOKE EXECUTE ON FUNCTION _cat_tools.function__drop_temp(pg_catalog.regprocedure, text) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION _cat_tools.function__drop_temp(pg_catalog.regprocedure, text) TO cat_tools__usage;
+GRANT USAGE ON SCHEMA _cat_tools TO cat_tools__usage;
 
 -- https://github.com/jnasbyupgrade/cat_tools/blob/new_functions/sql/cat_tools.sql.in#L280
 ALTER TYPE cat_tools.relation_type ADD VALUE 'partitioned table';
