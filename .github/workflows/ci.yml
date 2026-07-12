@@ -121,12 +121,14 @@ jobs:
   extension-update-test:
     strategy:
       matrix:
-        # PG12 is the oldest version where the 0.2.2→0.3.0 update works.
-        # PG11 (and PG10) cannot run `ALTER TYPE ... ADD VALUE` in extension
-        # update scripts; this restriction was lifted in PG12.
-        # (PG10 is dropped; the 0.2.0/0.2.1 update paths required PG10 and
+        # Test the 0.2.2→0.3.0 update on every supported version. PG12 is the
+        # floor: the update script uses `ALTER TYPE ... ADD VALUE`, which PG11
+        # and below cannot run inside an extension update script (the
+        # restriction was lifted in PG12). There is no upper bound — 0.2.2
+        # installs cleanly on PG12+, so the update runs everywhere 0.3.0 does.
+        # (PG10/11 are dropped; the 0.2.0/0.2.1 update paths required them and
         # can no longer be tested.)
-        pg: [12]
+        pg: [18, 17, 16, 15, 14, 13, 12]
     name: ⬆️ Extension update test on PostgreSQL ${{ matrix.pg }}
     runs-on: ubuntu-latest
     container: pgxn/pgxn-tools

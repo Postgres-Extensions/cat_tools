@@ -46,10 +46,11 @@ the update script cannot run inside an extension update script on PG11 or earlie
 that cannot be updated to is not truly supported, PG10 and PG11 support is dropped
 entirely. cat_tools 0.3.0 supports PG12+.
 
-The `extension-update-test` job tests `pg: [12]` — PG12 is the oldest version where the
-0.2.2→0.3.0 update works. PG11 (and PG10) cannot run `ALTER TYPE ... ADD VALUE` in
-extension update scripts; this restriction was lifted in PG12. The 0.2.0/0.2.1 update
-paths required PG10 and can no longer be tested.
+The `extension-update-test` job tests the 0.2.2→0.3.0 update on the full `pg: [12..18]`
+matrix. PG12 is the floor — PG11 (and PG10) cannot run `ALTER TYPE ... ADD VALUE` in
+extension update scripts; this restriction was lifted in PG12. There is no upper bound:
+0.2.2 installs cleanly on PG12+, so the update runs everywhere 0.3.0 does. The 0.2.0/0.2.1
+update paths required PG10 and can no longer be tested.
 
 ## Code Style
 
