@@ -28,7 +28,12 @@ jobs:
       - name: Install rsync
         run: apt-get install -y rsync
       - name: Test on PostgreSQL ${{ matrix.pg }}
-        run: make test
+        run: |
+          make test
+          # `make test` never exits non-zero on regressions (pgxntool marks
+          # installcheck `.IGNORE`), so gate the build explicitly on the
+          # pgtap/regression.diffs check or failures would pass silently.
+          make verify-results
 
   pg-upgrade-test:
     strategy:
@@ -62,7 +67,9 @@ jobs:
         uses: actions/checkout@v6
       - name: Set expected extension version
         run: |
-          echo "EXPECTED_VERSION=$(sed -n "s/^default_version = '\(.*\)'$/\1/p" cat_tools.control)" >> $GITHUB_ENV
+          EXPECTED_VERSION="$(sed -n "s/^default_version = '\(.*\)'$/\1/p" cat_tools.control)"
+          test -n "$EXPECTED_VERSION" || { echo "Failed to parse default_version from cat_tools.control"; exit 1; }
+          echo "EXPECTED_VERSION=$EXPECTED_VERSION" >> "$GITHUB_ENV"
       - name: Install rsync
         run: apt-get install -y rsync
       - name: Install cat_tools into old cluster
@@ -99,9 +106,13 @@ jobs:
         run: |
           VERSION=$(psql -tAc "SELECT extversion FROM pg_extension WHERE extname = 'cat_tools'")
           echo "Extension version: ${VERSION:-<not found>}"
-          echo "$VERSION" | grep -qF "$EXPECTED_VERSION"
+          test -n "$VERSION" || { echo "cat_tools extension version not found after upgrade"; exit 1; }
+          [ "$VERSION" = "$EXPECTED_VERSION" ]
       - name: Run test suite on upgraded cluster
-        run: make test
+        run: |
+          make test
+          # See note in the "test" job: make test does not fail on regressions.
+          make verify-results
       # TODO: also test ALTER EXTENSION cat_tools UPDATE here, once the
       # pg_upgrade source versions (e.g. 0.2.0) can install on the new_pg
       # version. Currently the pre-0.2.2 install scripts fail on PG11+ so
@@ -128,7 +139,9 @@ jobs:
         run: apt-get install -y rsync
       - name: Set expected extension version
         run: |
-          echo "EXPECTED_VERSION=$(sed -n "s/^default_version = '\(.*\)'$/\1/p" cat_tools.control)" >> $GITHUB_ENV
+          EXPECTED_VERSION="$(sed -n "s/^default_version = '\(.*\)'$/\1/p" cat_tools.control)"
+          test -n "$EXPECTED_VERSION" || { echo "Failed to parse default_version from cat_tools.control"; exit 1; }
+          echo "EXPECTED_VERSION=$EXPECTED_VERSION" >> "$GITHUB_ENV"
       - name: Install cat_tools (all versions)
         run: make install
       - name: Test update from 0.2.2 (0.2.2→current path)
@@ -138,9 +151,13 @@ jobs:
           psql -d cat_tools_from_022 -c "ALTER EXTENSION cat_tools UPDATE"
           VERSION=$(psql -d cat_tools_from_022 -tAc "SELECT extversion FROM pg_extension WHERE extname = 'cat_tools'")
           echo "Version after 0.2.2 update: ${VERSION:-<not found>}"
-          echo "$VERSION" | grep -qF "$EXPECTED_VERSION"
+          test -n "$VERSION" || { echo "cat_tools extension version not found after 0.2.2 update"; exit 1; }
+          [ "$VERSION" = "$EXPECTED_VERSION" ]
       - name: Run test suite on updated extension
-        run: make test
+        run: |
+          make test
+          # See note in the "test" job: make test does not fail on regressions.
+          make verify-results
 
   # A single stable check name for use as a required status check in branch
   # protection rules. Matrix jobs produce check names like "🐘 PostgreSQL 14"
