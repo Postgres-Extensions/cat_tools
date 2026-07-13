@@ -10,12 +10,8 @@ on:
   pull_request_review:
     types: [submitted]
 
-# Serialize per issue/PR. cancel-in-progress is false on purpose: cancelling
-# would kill Claude mid-response if another comment lands while it's working.
-concurrency:
-  group: claude-${{ github.event.issue.number || github.event.pull_request.number }}
-  cancel-in-progress: false
-
+# No concurrency limit: @claude mentions are independent, read-only requests;
+# serializing would only delay responses and cancelling would drop them.
 jobs:
   claude:
     if: |
