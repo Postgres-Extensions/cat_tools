@@ -1,0 +1,52 @@
+name: Claude Code Review
+
+# Runs on PRs INTO this repo. We use pull_request_target (not pull_request) so
+# that PRs from a fork can access CLAUDE_CODE_OAUTH_TOKEN — GitHub withholds
+# secrets from `pull_request` runs triggered by forks, which is why the plain
+# `pull_request` version never worked for fork PRs.
+#
+# SECURITY: pull_request_target runs in the BASE repo with secrets and a
+# write-capable token. The job is gated to PRs from the trusted `jnasbyupgrade`
+# fork only — an arbitrary external fork can never trigger this secret-bearing
+# job. The workflow file always comes from the base branch (master), so a PR
+# cannot modify the reviewer that runs on it. We check out the PR head only for
+# read context (persist-credentials: false) and never build or execute PR code.
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  claude-review:
+    # Trusted fork only, and skip drafts (don't spend API/CI on unfinished PRs).
+    # To add more trusted owners, extend the head-owner check.
+    if: >-
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.owner.login == 'jnasbyupgrade'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: write   # post the review comments
+      id-token: write
+    steps:
+      - name: Check out PR head (read-only context)
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Run Claude Code Review
+        uses: anthropics/claude-code-action@e90deca47693f9457b72f2b53c17d7c445a87342 # v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # NOTE: plugin_marketplaces can't be pinned — it tracks the
+          # marketplace repo's default branch (upstream anthropics/claude-code).
+          plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
+          plugins: 'code-review@claude-code-plugins'
+          prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
