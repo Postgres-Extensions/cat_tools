@@ -1,7 +1,5 @@
 @generated@
 
-SET LOCAL client_min_messages = WARNING;
-
 DO $$
 BEGIN
   CREATE ROLE cat_tools__usage NOLOGIN;
