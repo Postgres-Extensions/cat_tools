@@ -117,9 +117,11 @@ EXTRA_CLEAN += $(RELKIND_SRC) $(RELKIND_STAMP)
 .PHONY: check-relkind-source
 check-relkind-source: $(RELKIND_SRC)
 	@grep -q 'RELKIND_' $(RELKIND_SRC) || { \
-	  echo "ERROR: $(RELKIND_SRC) contains no relkinds. postgresql-server-dev-NN"; \
-	  echo "       (catalog/pg_class.h) is not installed, so the relkind drift"; \
-	  echo "       check would pass without actually running. Install it."; \
+	  echo "ERROR: PostgreSQL catalog header not found at"; \
+	  echo "         $(RELKIND_HEADER)"; \
+	  echo "       so the relkind drift check in test/sql/relation__.sql would"; \
+	  echo "       pass without running. Install this PostgreSQL version's server"; \
+	  echo "       development headers so that path exists."; \
 	  exit 1; \
 	}
 	@echo "check-relkind-source: $(RELKIND_SRC) is populated"
@@ -130,7 +132,7 @@ check-relkind-source: $(RELKIND_SRC)
 # Listed as a `test` prerequisite after base.mk's, so it runs once tests are done.
 .PHONY: warn-relkind-source
 warn-relkind-source: $(RELKIND_SRC)
-	@grep -q 'RELKIND_' $(RELKIND_SRC) || echo "WARNING: $(RELKIND_SRC) is empty (postgresql-server-dev-NN not installed); the pg_class.h relkind drift check did NOT actually run."
+	@grep -q 'RELKIND_' $(RELKIND_SRC) || echo "WARNING: PostgreSQL catalog header not found at $(RELKIND_HEADER); the relkind drift check in test/sql/relation__.sql did NOT run. Install this PostgreSQL version's server development headers to enable it."
 test: warn-relkind-source
 
 # Temporary ugly hack for 9.x — remove these two blocks when 9.x support is dropped.
