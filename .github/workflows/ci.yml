@@ -163,7 +163,20 @@ jobs:
           echo "Version after 0.2.2 update: ${VERSION:-<not found>}"
           test -n "$VERSION" || { echo "cat_tools extension version not found after 0.2.2 update"; exit 1; }
           [ "$VERSION" = "$EXPECTED_VERSION" ]
-      - name: Run test suite on updated extension
+      - name: Run test suite against the upgraded (0.2.2→current) database
+        # TEST_LOAD_SOURCE=upgrade makes the pgTAP suite load the extension via
+        # CREATE EXTENSION VERSION '0.2.2' + ALTER EXTENSION UPDATE (committed,
+        # before the suite, by test/install/load_upgrade.sql) instead of a fresh
+        # CREATE EXTENSION. Reusing the SAME expected output, this asserts that
+        # an upgraded database behaves identically to a fresh install -- the
+        # fresh-vs-upgrade equivalence the "Test update from 0.2.2" step above
+        # cannot check (it only asserts the resulting version number). The
+        # committed upgrade is required because the 0.2.2→0.3.0 update uses
+        # ALTER TYPE ... ADD VALUE, whose new values cannot be used in the same
+        # transaction (see test/install/load_upgrade.sql). `make install` (all
+        # versions) already ran above, so test-build finds the update script.
+        env:
+          TEST_LOAD_SOURCE: upgrade
         run: |
           make check-relkind-source
           make test

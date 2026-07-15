@@ -2,6 +2,39 @@ B = sql
 
 testdeps: $(wildcard test/*.sql test/helpers/*.sql) # Be careful not to include directories in this
 
+# Upgrade-suite toggle (fresh-vs-upgrade equivalence check).
+#
+# By default the pgTAP suite loads the extension fresh (CREATE EXTENSION
+# cat_tools) via test/deps.sql. Setting TEST_LOAD_SOURCE=upgrade instead runs
+# the SAME suite against a database that was installed at the 0.2.2 floor and
+# updated to the current version -- verifying that an upgraded database behaves
+# identically to a fresh install (the same expected output must pass).
+#
+# The upgrade is performed COMMITTED, before the suite, by
+# test/install/load_upgrade.sql via pgxntool's native test/install feature.
+# That committed step is required because the 0.2.2->0.3.0 update uses
+# ALTER TYPE ... ADD VALUE, and a newly added enum value cannot be USED in the
+# transaction that added it -- so it cannot be done inside deps.sql's per-test
+# transaction (see test/install/load_upgrade.sql and test/deps.sql).
+#
+# Mechanics:
+#   - In upgrade mode we enable test/install and set the
+#     cat_tools.test_load_mode placeholder GUC via PGOPTIONS. pg_regress does
+#     not forward make variables, but the psql processes it spawns inherit the
+#     environment, so deps.sql reads the GUC and skips its fresh CREATE.
+#   - In fresh mode we force test/install OFF (overriding pgxntool's
+#     auto-detect, which would otherwise enable it because the directory has a
+#     .sql file), so the default `make test` path is completely unchanged.
+#
+# Upgrade mode requires PG12+ (ALTER TYPE ... ADD VALUE cannot run in a
+# transaction at all before PG12); CI restricts it accordingly.
+ifeq ($(TEST_LOAD_SOURCE),upgrade)
+export PGOPTIONS := $(PGOPTIONS) -c cat_tools.test_load_mode=upgrade
+PGXNTOOL_ENABLE_TEST_INSTALL = yes
+else
+PGXNTOOL_ENABLE_TEST_INSTALL = no
+endif
+
 include pgxntool/base.mk
 
 LT95		 = $(call test, $(MAJORVER), -lt, 95)
@@ -25,6 +58,10 @@ DATA += $(filter-out $(EXTENSION_VERSION_FILES) $(upgrade_scripts_out), $(versio
 all: $B/cat_tools.sql $(versioned_out)
 installcheck: $B/cat_tools.sql $(versioned_out)
 EXTRA_CLEAN += $B/cat_tools.sql $(versioned_out)
+
+# Clean the cruft pg_regress writes into test/install/ (the self-comparing
+# result .out and its diff), which is listed in test/install/.gitignore.
+EXTRA_CLEAN += $(addprefix test/install/,$(shell grep -v '^\#' test/install/.gitignore 2>/dev/null))
 
 # Generate the canonical set of pg_class.relkind values from the server headers
 # we are building against, for the relkind drift check in test/sql/relation__.sql.

@@ -1,0 +1,6 @@
+# pg_regress writes the install step's result (and any diff) here, because the
+# install schedule references tests as ../install/<name>. The install output is
+# self-comparing (pg_regress resolves both the expected and result paths to this
+# directory), so it is never asserted and must not be tracked.
+load_upgrade.out
+install.out.diff
