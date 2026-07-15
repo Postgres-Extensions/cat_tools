@@ -2,5 +2,5 @@
 # install schedule references tests as ../install/<name>. The install output is
 # self-comparing (pg_regress resolves both the expected and result paths to this
 # directory), so it is never asserted and must not be tracked.
-load_upgrade.out
+load.out
 install.out.diff
