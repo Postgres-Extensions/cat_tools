@@ -40,8 +40,8 @@ CREATE TEMP VIEW kinds (relkind, kind) AS
 SELECT plan(
   (1 + 2 + 2 * (SELECT count(*)::int FROM kinds)) -- relation_type enum mapping
   + 5 -- relation__is_temp
-  + 5 -- relation__is_catalog
-  + 8 -- relation__column_names
+  + 4 -- relation__is_catalog
+  + 5 -- relation__column_names
   + 1 -- relkind drift check vs pg_class.h
 );
 
@@ -118,10 +118,18 @@ SELECT is(
   , 'pg_catalog.pg_class is not a temp relation'
 );
 
-SELECT lives_ok($$CREATE TEMP TABLE is_temp_test()$$, 'Create temp table for testing');
+/*
+ * One temp table is shared by the relation__is_temp, relation__is_catalog and
+ * relation__column_names tests below: a temp relation (hence not in pg_catalog)
+ * with a known set of columns is everything those three functions need.
+ */
+SELECT lives_ok(
+  $$CREATE TEMP TABLE rel_test(col1 int, col2 text, col3 boolean, col4 timestamp, col5 numeric)$$
+  , 'Create shared temp table for is_temp/is_catalog/column_names tests'
+);
 
 SELECT is(
-  cat_tools.relation__is_temp('is_temp_test'::regclass)
+  cat_tools.relation__is_temp('rel_test'::regclass)
   , true
   , 'temp relation is correctly identified as temp'
 );
@@ -156,10 +164,8 @@ SELECT is(
   , 'pg_catalog.pg_class is in pg_catalog schema'
 );
 
-SELECT lives_ok($$CREATE TEMP TABLE is_catalog_test()$$, 'Create temp table for testing');
-
 SELECT is(
-  cat_tools.relation__is_catalog('is_catalog_test'::regclass)
+  cat_tools.relation__is_catalog('rel_test'::regclass)
   , false
   , 'temp relation is not in pg_catalog schema'
 );
@@ -179,7 +185,7 @@ SELECT throws_ok(
   format(
     $$SELECT %I.%I( %L )$$
     , :'s', :'f'
-    , 'temp_test_table'
+    , 'rel_test'
   )
   , '42501'
   , NULL
@@ -188,28 +194,18 @@ SELECT throws_ok(
 
 SET LOCAL ROLE :use_role;
 
-SELECT lives_ok($$CREATE TEMP TABLE temp_test_table(col1 int, col2 text, col3 boolean, col4 timestamp, col5 numeric)$$, 'Create temp table with multiple columns');
-
 SELECT is(
-  cat_tools.relation__column_names('temp_test_table'::regclass)
+  cat_tools.relation__column_names('rel_test'::regclass)
   , '{col1,col2,col3,col4,col5}'::text[]
   , 'Temp table returns expected column names'
 );
 
-SELECT lives_ok($$ALTER TABLE temp_test_table DROP COLUMN col3$$, 'Drop middle column from temp table');
+SELECT lives_ok($$ALTER TABLE rel_test DROP COLUMN col3$$, 'Drop middle column from temp table');
 
 SELECT is(
-  cat_tools.relation__column_names('temp_test_table'::regclass)
+  cat_tools.relation__column_names('rel_test'::regclass)
   , '{col1,col2,col4,col5}'::text[]
   , 'Temp table with dropped column returns expected column names'
-);
-
-SELECT lives_ok($$CREATE TEMP TABLE test_table(id int, name text)$$, 'Create test table with columns');
-
-SELECT is(
-  cat_tools.relation__column_names('test_table'::regclass)
-  , '{id,name}'::text[]
-  , 'Test table returns expected column names'
 );
 
 SELECT is(
