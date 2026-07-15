@@ -542,7 +542,10 @@ pgxntool/setup.sh</pre>
 <h2 id="_development"><a class="anchor" href="#_development"></a><a class="link" href="#_development">2. Development</a></h2>
 <div class="sectionbody">
 <div class="paragraph">
-<p>If you want to contribute to pgxntool development, work from the <a href="https://github.com/decibel/pgxntool-test">pgxntool-test</a> repository, not from this repository. That repository contains the test infrastructure and development tools needed to validate changes to pgxntool. This repository contains only the framework files that get embedded into extension projects via <code>git subtree</code>.</p>
+<p>If you want to contribute to pgxntool development, work from the <a href="https://github.com/Postgres-Extensions/pgxntool-test">pgxntool-test</a> repository, not from this repository. That repository contains the test infrastructure and development tools needed to validate changes to pgxntool. This repository contains only the framework files that get embedded into extension projects via <code>git subtree</code>.</p>
+</div>
+<div class="paragraph">
+<p>Changes are normally paired across both repos: a <code>pgxntool</code> change should come with a matching branch (same name, on the same account) and PR in <code>pgxntool-test</code>, and CI enforces this pairing. See the <a href="https://github.com/Postgres-Extensions/pgxntool-test#ci-and-contributing">CI and Contributing</a> section in pgxntool-test for the full workflow.</p>
 </div>
 </div>
 </div>
