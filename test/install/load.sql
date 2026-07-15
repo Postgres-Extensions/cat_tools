@@ -48,6 +48,36 @@
 SET client_min_messages = WARNING;
 
 /*
+ * The test-role names come from test/roles.sql (the single source of truth,
+ * also loaded per-test by test/deps.sql). Each :var holds the RAW identifier;
+ * we quote it at every use site (:"use_role" for CREATE ROLE / GRANT, :'use_role'
+ * for the pg_temp.drop_role() text argument).
+ */
+\i test/roles.sql
+
+/*
+ * Mode selection. The Makefile always exports cat_tools.test_load_mode via
+ * PGOPTIONS (fresh or upgrade). Read it WITHOUT missing_ok: if the GUC did not
+ * propagate (a break anywhere in make -> PGOPTIONS -> env -> psql), current_setting
+ * errors here and the whole install step fails loudly, instead of silently
+ * falling back to fresh and running the wrong suite. The DO block then rejects
+ * any value other than fresh/upgrade with a clear message.
+ */
+SELECT current_setting('cat_tools.test_load_mode') AS cat_tools_test_load_mode
+\gset
+
+DO $$
+BEGIN
+  IF current_setting('cat_tools.test_load_mode') NOT IN ('fresh', 'upgrade') THEN
+    RAISE EXCEPTION
+      'cat_tools.test_load_mode must be ''fresh'' or ''upgrade'', got ''%'''
+      , current_setting('cat_tools.test_load_mode')
+    ;
+  END IF;
+END
+$$;
+
+/*
  * Drop-first: a re-run on an existing cluster must install the newest build,
  * never reuse stale objects left by a previous run. Drop the extension, then
  * the roles.
@@ -57,38 +87,32 @@ SET client_min_messages = WARNING;
  * members, so they survive DROP EXTENSION. The 0.2.2 install script uses a
  * bare CREATE ROLE (unlike the current version's duplicate-tolerant DO block),
  * so a leftover role would break a re-run in upgrade mode. Drop all three
- * roles explicitly. DROP OWNED BY first strips privileges granted TO each role
- * (e.g. CREATE on public, cat_tools__usage membership) so DROP ROLE cannot
- * fail with a dependency error; guarded by pg_roles because DROP OWNED BY
- * errors on a nonexistent role.
+ * roles explicitly via pg_temp.drop_role(): DROP OWNED BY first strips
+ * privileges granted TO the role (e.g. CREATE on public, cat_tools__usage
+ * membership) so DROP ROLE cannot fail with a dependency error; the pg_roles
+ * guard skips a not-yet-existing role (DROP OWNED BY errors on one), and
+ * format(%I) quotes the name correctly for the now mixed-case test roles.
+ * cat_tools__usage is not a test role (the extension script creates it) but is
+ * routed through the same helper so an upgrade-mode re-run starts clean.
  */
 DROP EXTENSION IF EXISTS cat_tools CASCADE;
 
-DO $$
+CREATE FUNCTION pg_temp.drop_role(
+  role_name text
+) RETURNS void LANGUAGE plpgsql AS $$
 BEGIN
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'cat_tools_testing__use_role') THEN
-    DROP OWNED BY cat_tools_testing__use_role;
-  END IF;
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'cat_tools_testing__no_use_role') THEN
-    DROP OWNED BY cat_tools_testing__no_use_role;
-  END IF;
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'cat_tools__usage') THEN
-    DROP OWNED BY cat_tools__usage;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = role_name) THEN
+    EXECUTE format('DROP OWNED BY %I', role_name);
+    EXECUTE format('DROP ROLE IF EXISTS %I', role_name);
   END IF;
 END
 $$;
-DROP ROLE IF EXISTS cat_tools_testing__use_role;
-DROP ROLE IF EXISTS cat_tools_testing__no_use_role;
-DROP ROLE IF EXISTS cat_tools__usage;
 
-/*
- * Mode selection. Default (unset GUC) is fresh; 'upgrade' selects the update
- * path. Read via current_setting(..., true) so a missing GUC yields NULL
- * rather than erroring.
- */
-SELECT lower(coalesce(
-      current_setting('cat_tools.test_load_mode', true), 'fresh'
-    )) = 'upgrade' AS cat_tools_upgrade_mode
+SELECT pg_temp.drop_role(:'use_role');
+SELECT pg_temp.drop_role(:'no_use_role');
+SELECT pg_temp.drop_role('cat_tools__usage');
+
+SELECT :'cat_tools_test_load_mode' = 'upgrade' AS cat_tools_upgrade_mode
 \gset
 
 \if :cat_tools_upgrade_mode
@@ -107,17 +131,18 @@ CREATE EXTENSION cat_tools;
 
 /*
  * Test roles and grants the suite depends on. Formerly created per-test in
- * deps.sql; now committed here once.
+ * deps.sql; now committed here once. Names come from test/roles.sql; the
+ * mixed-case identifiers must be double-quoted via :"var".
  */
-CREATE ROLE cat_tools_testing__no_use_role;
-CREATE ROLE cat_tools_testing__use_role;
+CREATE ROLE :"no_use_role";
+CREATE ROLE :"use_role";
 
-GRANT cat_tools__usage TO cat_tools_testing__use_role;
+GRANT cat_tools__usage TO :"use_role";
 /*
  * PG15+ removed CREATE on the public schema from PUBLIC; grant it explicitly
  * for tests that create shadow names in public to check catalog-lookup
  * correctness.
  */
-GRANT CREATE ON SCHEMA public TO cat_tools_testing__use_role;
+GRANT CREATE ON SCHEMA public TO :"use_role";
 
 -- vi: expandtab ts=2 sw=2

@@ -4,7 +4,7 @@
 
 \set s cat_tools
 
-SET LOCAL ROLE :use_role;
+SET LOCAL ROLE :"use_role";
 
 /*
  * Canonical pg_class.relkind -> cat_tools.relation_type mapping.
@@ -97,7 +97,7 @@ SELECT set_has(
 -- relation__is_temp
 \set f relation__is_temp
 
-SET LOCAL ROLE :no_use_role;
+SET LOCAL ROLE :"no_use_role";
 
 SELECT throws_ok(
   format(
@@ -110,7 +110,7 @@ SELECT throws_ok(
   , 'Verify public has no perms'
 );
 
-SET LOCAL ROLE :use_role;
+SET LOCAL ROLE :"use_role";
 
 SELECT is(
   cat_tools.relation__is_temp('pg_catalog.pg_class'::regclass)
@@ -143,7 +143,7 @@ SELECT is(
 -- relation__is_catalog
 \set f relation__is_catalog
 
-SET LOCAL ROLE :no_use_role;
+SET LOCAL ROLE :"no_use_role";
 
 SELECT throws_ok(
   format(
@@ -156,7 +156,7 @@ SELECT throws_ok(
   , 'Verify public has no perms'
 );
 
-SET LOCAL ROLE :use_role;
+SET LOCAL ROLE :"use_role";
 
 SELECT is(
   cat_tools.relation__is_catalog('pg_catalog.pg_class'::regclass)
@@ -179,7 +179,7 @@ SELECT is(
 -- relation__column_names
 \set f relation__column_names
 
-SET LOCAL ROLE :no_use_role;
+SET LOCAL ROLE :"no_use_role";
 
 SELECT throws_ok(
   format(
@@ -192,7 +192,7 @@ SELECT throws_ok(
   , 'Verify public has no perms'
 );
 
-SET LOCAL ROLE :use_role;
+SET LOCAL ROLE :"use_role";
 
 SELECT is(
   cat_tools.relation__column_names('rel_test'::regclass)

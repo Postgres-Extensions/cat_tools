@@ -16,7 +16,7 @@ SELECT 'cat_tools.' || typname AS type_name
     AND t.typtype IN ('e', 'c') -- enums and composite types
   ORDER BY typname
 ;
-GRANT SELECT ON cat_types TO :use_role, :no_use_role;
+GRANT SELECT ON cat_types TO :"use_role", :"no_use_role";
 
 CREATE TEMP VIEW cat_functions AS
 SELECT p.oid, p.proname, pg_get_function_arguments(p.oid) AS args
@@ -24,7 +24,7 @@ SELECT p.oid, p.proname, pg_get_function_arguments(p.oid) AS args
   WHERE p.pronamespace = 'cat_tools'::regnamespace
   ORDER BY proname, pg_get_function_arguments(p.oid)
 ;
-GRANT SELECT ON cat_functions TO :use_role, :no_use_role;
+GRANT SELECT ON cat_functions TO :"use_role", :"no_use_role";
 
 SELECT plan(
     (SELECT count(*)::int FROM cat_types) * 2      -- no_use denied + use allowed
@@ -57,7 +57,7 @@ SELECT is(
  * Type access checks via role switching.
  * Attempts actual casts to verify enforcement at the SQL level.
  */
-SET LOCAL ROLE :no_use_role;
+SET LOCAL ROLE :"no_use_role";
 
 SELECT throws_ok(
     format('SELECT NULL::%s', type_name)
@@ -68,7 +68,7 @@ SELECT throws_ok(
   FROM cat_types
 ;
 
-SET LOCAL ROLE :use_role;
+SET LOCAL ROLE :"use_role";
 
 SELECT lives_ok(
     format('SELECT NULL::%s', type_name)

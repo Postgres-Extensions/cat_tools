@@ -4,7 +4,7 @@
 
 \set s cat_tools
 
-SET LOCAL ROLE :use_role;
+SET LOCAL ROLE :"use_role";
 
 SELECT plan(
     (1 + 2 + 3 * array_length(cat_tools.enum_range('cat_tools.routine_type'), 1))
@@ -59,7 +59,7 @@ CREATE TEMP VIEW func_calls AS
 ;
 GRANT SELECT ON func_calls TO public;
 
-SET LOCAL ROLE :no_use_role;
+SET LOCAL ROLE :"no_use_role";
 
 SELECT throws_ok(
       format(
@@ -79,7 +79,7 @@ SELECT throws_ok(
  * SET LOCAL ROLE makes current_user = use_role while session_user = superuser,
  * so current_user != session_user, and the function should throw 28000.
  */
-SET LOCAL ROLE :use_role;
+SET LOCAL ROLE :"use_role";
 SELECT throws_ok(
   $$SELECT cat_tools.routine__parse_arg_types('int')$$
   , '28000'
@@ -92,7 +92,7 @@ SELECT throws_ok(
  * required by the parse helper security guard.  All functional tests below
  * run under this authorization.
  */
-SET SESSION AUTHORIZATION :use_role;
+SET SESSION AUTHORIZATION :"use_role";
 
 /*
  * routine__parse_arg_types / routine__parse_arg_types_text

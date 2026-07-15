@@ -22,8 +22,17 @@ PGXNTOOL_ENABLE_TEST_INSTALL = yes
 #
 # The mode is signalled to load.sql by the cat_tools.test_load_mode placeholder
 # GUC. pg_regress does not forward make variables, but the psql processes it
-# spawns inherit the environment, so PGOPTIONS reaches load.sql; the default
-# (unset) reads as fresh.
+# spawns inherit the environment, so PGOPTIONS reaches load.sql.
+#
+# The GUC is exported UNCONDITIONALLY (with the mode value), so load.sql can read
+# it WITHOUT missing_ok and fail loudly if it did not propagate. Relying on an
+# absent GUC to mean "fresh" is unsafe: a silent break anywhere in the
+# make -> PGOPTIONS -> env -> psql chain would quietly run fresh in place of the
+# intended upgrade test. Making the mode explicit and required removes that trap.
+#
+# TEST_LOAD_SOURCE must be exactly `fresh` or `upgrade`; anything else is a hard
+# error at parse time (so e.g. `make test TEST_LOAD_SOURCE=typo` fails fast
+# rather than defaulting).
 #
 # The upgrade must be committed (which is why it lives in test/install, not in
 # deps.sql's per-test transaction): the update to the current version runs
@@ -32,9 +41,11 @@ PGXNTOOL_ENABLE_TEST_INSTALL = yes
 #
 # Upgrade mode requires PG12+ (ALTER TYPE ... ADD VALUE cannot run in a
 # transaction at all before PG12); CI restricts it accordingly.
-ifeq ($(TEST_LOAD_SOURCE),upgrade)
-export PGOPTIONS := $(PGOPTIONS) -c cat_tools.test_load_mode=upgrade
+TEST_LOAD_SOURCE ?= fresh
+ifeq ($(filter $(TEST_LOAD_SOURCE),fresh upgrade),)
+$(error TEST_LOAD_SOURCE must be 'fresh' or 'upgrade', got '$(TEST_LOAD_SOURCE)')
 endif
+export PGOPTIONS := $(PGOPTIONS) -c cat_tools.test_load_mode=$(TEST_LOAD_SOURCE)
 
 # Convenience wrapper: `make test-update` == `make test TEST_LOAD_SOURCE=upgrade`.
 # Must recurse (a fresh $(MAKE)) rather than depend on `test`, so the parse-time

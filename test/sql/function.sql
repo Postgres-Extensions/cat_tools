@@ -32,7 +32,7 @@ SELECT isnt_definer(:'_s', :'f', :'args'::name[]);
  * security check that throws when current_user != session_user.  SET SESSION
  * AUTHORIZATION satisfies that check for the rest of this file.
  */
-SET SESSION AUTHORIZATION :use_role;
+SET SESSION AUTHORIZATION :"use_role";
 
 SELECT is(
   :s.regprocedure('array_length', 'anyarray, integer')
