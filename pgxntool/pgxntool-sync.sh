@@ -38,7 +38,8 @@ ref=${2:-$DEFAULT_REF}
 # We must run from the project root: git subtree pull operates on the pgxntool/
 # prefix and update-setup-files.sh resolves paths relative to the current dir.
 [[ -d "pgxntool" ]] || die 1 "pgxntool directory not found. Run from your project root."
-[[ -d ".git" ]] || die 1 "Not in a git repository. Run from your project root."
+# Use rev-parse, not [ -d .git ]: in a worktree .git is a file, not a directory.
+git rev-parse --git-dir >/dev/null 2>&1 || die 1 "Not in a git repository. Run from your project root."
 
 # The old commit is the pgxntool subtree HEAD before the pull; update-setup-files.sh
 # needs it as the merge base for files that were copied out of pgxntool.

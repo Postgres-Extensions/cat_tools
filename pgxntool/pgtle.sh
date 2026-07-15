@@ -156,7 +156,7 @@ MODULE_PATHNAME=""
 VERSION_FILES=()
 UPGRADE_FILES=()
 
-debug 1 "Global arrays initialized: VERSION_FILES=${#VERSION_FILES[@]}, UPGRADE_FILES=${#UPGRADE_FILES[@]}"
+debug 30 "Global arrays initialized: VERSION_FILES=${#VERSION_FILES[@]}, UPGRADE_FILES=${#UPGRADE_FILES[@]}"
 PGTLE_VERSION=""  # Empty = generate all
 GET_DIR_VERSION=""  # For --get-dir option
 
@@ -463,7 +463,15 @@ parse_control_file() {
             # Order matters: stripping quotes before removing comments leaves a rogue
             # trailing quote for values like 'version' # note. See issue #25.
             value="${value%%#*}"  # Remove trailing comments
-            value="${value%% }"   # Trim trailing whitespace
+            # Trim all trailing whitespace (spaces and tabs). The prior %% pattern with
+            # a literal space only removed one character; multiple spaces or a tab before
+            # the comment (e.g., 'value'   # note or 'value'$'\t'# note) would leave
+            # stray whitespace that breaks the quote-strip below.
+            if [[ "$value" =~ ^(.*[^[:space:]])[[:space:]]*$ ]]; then
+                value="${BASH_REMATCH[1]}"
+            else
+                value=""
+            fi
 
             # Strip quotes if present (both single and double)
             value="${value#\'}"
@@ -513,21 +521,21 @@ parse_control_file() {
 
 discover_sql_files() {
     echo "Discovering SQL files for extension: $EXTENSION" >&2
-    debug 2 "discover_sql_files: Starting discovery for extension: $EXTENSION"
+    debug 30 "discover_sql_files: Starting discovery for extension: $EXTENSION"
 
     # Ensure default_version file exists and has content if base file exists
     # This handles the case where make all hasn't generated it yet, or it exists but is empty
     local default_version_file="sql/${EXTENSION}--${DEFAULT_VERSION}.sql"
     local base_file="sql/${EXTENSION}.sql"
     if [ -f "$base_file" ] && ([ ! -f "$default_version_file" ] || [ ! -s "$default_version_file" ]); then
-        debug 3 "discover_sql_files: Creating default_version file from base file"
+        debug 40 "discover_sql_files: Creating default_version file from base file"
         cp "$base_file" "$default_version_file"
     fi
 
     # Find versioned files: sql/{ext}--{version}.sql
     # Use find to get proper null-delimited output, then filter out upgrade scripts
     VERSION_FILES=()  # Reset array
-    debug 3 "discover_sql_files: Reset VERSION_FILES array"
+    debug 40 "discover_sql_files: Reset VERSION_FILES array"
     while IFS= read -r -d '' file; do
         local basename=$(basename "$file" .sql)
         local dash_count=$(echo "$basename" | grep -o -- "--" | wc -l | tr -d '[:space:]')
@@ -545,7 +553,7 @@ discover_sql_files() {
     # Find upgrade scripts: sql/{ext}--{ver1}--{ver2}.sql
     # These have TWO occurrences of "--" in the filename
     UPGRADE_FILES=()  # Reset array
-    debug 3 "discover_sql_files: Reset UPGRADE_FILES array"
+    debug 40 "discover_sql_files: Reset UPGRADE_FILES array"
     while IFS= read -r -d '' file; do
         # Empty upgrade files are allowed (no-op upgrades)
         local basename=$(basename "$file" .sql)
@@ -566,15 +574,15 @@ discover_sql_files() {
         echo "    - $f" >&2
     done
 
-    debug 3 "discover_sql_files: Checking UPGRADE_FILES array, count=${#UPGRADE_FILES[@]}"
+    debug 40 "discover_sql_files: Checking UPGRADE_FILES array, count=${#UPGRADE_FILES[@]}"
     if array_not_empty "${#UPGRADE_FILES[@]}"; then
         echo "  Found ${#UPGRADE_FILES[@]} upgrade script(s):" >&2
-        debug 2 "discover_sql_files: Iterating over ${#UPGRADE_FILES[@]} upgrade files"
+        debug 30 "discover_sql_files: Iterating over ${#UPGRADE_FILES[@]} upgrade files"
         for f in "${UPGRADE_FILES[@]}"; do
             echo "    - $f" >&2
         done
     else
-        debug 2 "discover_sql_files: No upgrade files found"
+        debug 30 "discover_sql_files: No upgrade files found"
     fi
 }
 
@@ -752,7 +760,7 @@ generate_install_update_path() {
 
 generate_pgtle_sql() {
     local pgtle_version="$1"
-    debug 2 "generate_pgtle_sql: Starting for version $pgtle_version, extension $EXTENSION"
+    debug 30 "generate_pgtle_sql: Starting for version $pgtle_version, extension $EXTENSION"
     
     # Get capability using function (compatible with bash < 4.0)
     local capability=$(get_pgtle_capability "$pgtle_version")
@@ -761,9 +769,9 @@ generate_pgtle_sql() {
     
     # Ensure arrays are initialized (defensive programming)
     # Arrays should already be initialized at top level, but ensure they exist
-    debug 3 "generate_pgtle_sql: Checking array initialization"
-    debug 2 "generate_pgtle_sql: VERSION_FILES is ${VERSION_FILES+set}, count=${#VERSION_FILES[@]}"
-    debug 2 "generate_pgtle_sql: UPGRADE_FILES is ${UPGRADE_FILES+set}, count=${#UPGRADE_FILES[@]}"
+    debug 40 "generate_pgtle_sql: Checking array initialization"
+    debug 30 "generate_pgtle_sql: VERSION_FILES is ${VERSION_FILES+set}, count=${#VERSION_FILES[@]}"
+    debug 30 "generate_pgtle_sql: UPGRADE_FILES is ${UPGRADE_FILES+set}, count=${#UPGRADE_FILES[@]}"
     
     if [ -z "${VERSION_FILES+set}" ]; then
         echo "WARNING: VERSION_FILES not set, initializing" >&2
@@ -822,17 +830,17 @@ EOF
 
         # Install all upgrade paths
         local upgrade_count=${#UPGRADE_FILES[@]}
-        debug 3 "generate_pgtle_sql: upgrade_count=$upgrade_count"
+        debug 40 "generate_pgtle_sql: upgrade_count=$upgrade_count"
         if [ "$upgrade_count" -gt 0 ]; then
-            debug 2 "generate_pgtle_sql: Processing $upgrade_count upgrade path(s)"
+            debug 30 "generate_pgtle_sql: Processing $upgrade_count upgrade path(s)"
             local i=0
             while [ "$i" -lt "$upgrade_count" ]; do
-                debug 4 "generate_pgtle_sql: Processing upgrade file $i: ${UPGRADE_FILES[$i]}"
+                debug 50 "generate_pgtle_sql: Processing upgrade file $i: ${UPGRADE_FILES[$i]}"
                 generate_install_update_path "${UPGRADE_FILES[$i]}"
                 i=$((i + 1))
             done
         else
-            debug 2 "generate_pgtle_sql: No upgrade paths to process"
+            debug 30 "generate_pgtle_sql: No upgrade paths to process"
         fi
 
         cat <<EOF

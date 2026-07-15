@@ -146,9 +146,10 @@ process_symlink() {
 
 old_commit=$1
 
-# Verify we're in a git repo with pgxntool subtree
+# Verify we're in a git repo with pgxntool subtree.
+# Use rev-parse, not [ -d .git ]: in a worktree .git is a file, not a directory.
 [[ -d "pgxntool" ]] || die 1 "pgxntool directory not found. Run from project root."
-[[ -d ".git" ]] || die 1 "Not in a git repository."
+git rev-parse --git-dir >/dev/null 2>&1 || die 1 "Not in a git repository."
 
 # Verify the old commit is valid
 if ! git cat-file -e "${old_commit}^{commit}" 2>/dev/null; then
@@ -171,6 +172,10 @@ for entry in "${SETUP_SYMLINKS[@]}"; do
     target="${entry##*:}"
     process_symlink "$dest" "$target"
 done
+
+# Prune pgxntool's own dev-only dirs (.github/, .claude/) that the subtree pull
+# re-introduces but that don't belong in a consuming project (see lib.sh).
+prune_pgxntool_dev_dirs
 
 echo
 echo "Done. Review changes with 'git diff' and commit when ready."

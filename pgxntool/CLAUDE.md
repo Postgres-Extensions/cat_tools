@@ -2,12 +2,33 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## CI Monitoring After Every Push
+
+**REQUIRED**: After every `git push`, immediately start a background task to
+monitor the CI run for that push. If you pushed to both pgxntool and
+pgxntool-test, start a background task for each repo — do not monitor them
+sequentially.
+
+The CI monitor lives in the pgxntool-test checkout: run
+`bash ../pgxntool-test/.claude/skills/ci/scripts/monitor-ci.sh` (the `/ci`
+skill). It monitors both repos and derives the owner from the current repo.
+Pass the exact push SHA when available — `gh run list --branch` has a race
+condition: if two pushes land close together on the same branch, `--branch`
+may pick up the wrong run. `--commit SHA` targets the exact push and avoids it.
+
 ## Scope of This File
 
-The guidance in this CLAUDE.md applies to pgxntool's own source files and provides
-recommended best practices for projects using pgxntool. However, any agent working in
-an extension project should always defer to that project's own CLAUDE.md and
-instructions over anything stated here.
+**CLAUDE.md is for people USING pgxntool** — extension developers who have embedded
+pgxntool into their project via `git subtree`. It documents the build system, available
+commands, and how pgxntool works.
+
+**If you are making changes to pgxntool itself**, stop — you are in the wrong place.
+See `.claude/` in this directory for developer guidelines. More importantly, pgxntool
+development must be done from the **pgxntool-test** repository, not from here. See the
+`Development Workflow` section below.
+
+Any agent working in an extension project should always defer to that project's own
+CLAUDE.md and instructions over anything stated here.
 
 ## Git Commit Guidelines
 
