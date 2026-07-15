@@ -77,7 +77,7 @@ EXTRA_CLEAN += $(addprefix test/install/,$(shell grep -v '^\#' test/install/.git
 # installed the script emits an empty view so `make test` still works locally;
 # CI runs check-relkind-source (below) so a missing header can never let the
 # drift check pass silently, and `make test` warns about it locally.
-RELKIND_SRC = test/generated/pg_class_relkinds.sql
+RELKIND_SRC = test/.generated/pg_class_relkinds.sql
 
 # Absolute path to the header we extract relkinds from. Computed each `make`;
 # it changes when we build against a different PostgreSQL (pg_config differs).
@@ -87,33 +87,34 @@ RELKIND_HEADER := $(shell $(PG_CONFIG) --includedir-server)/catalog/pg_class.h
 # rewrites the stamp (bumping its mtime) when the path actually changed, so the
 # source is regenerated after a PostgreSQL-version switch even though the old
 # header file itself is untouched.
-RELKIND_STAMP = test/generated/.relkind-header-path
+RELKIND_STAMP = test/.generated/.relkind-header-path
+
+# Directory the generated files live in. It is listed as an ORDER-ONLY
+# prerequisite (after `|`) on the stamp and source recipes below: the directory
+# must exist before we write into it, but we must NOT rebuild those files just
+# because the directory changed. A directory's mtime bumps every time a file is
+# added to or removed from it, so as a normal prerequisite it would force
+# needless regeneration on every run; after `|` it means "ensure it exists, but
+# its timestamp is not a rebuild trigger."
+test/.generated:
+	@mkdir -p $@
 
 .PHONY: FORCE
 FORCE:
 
-$(RELKIND_STAMP): FORCE | test/generated
+$(RELKIND_STAMP): FORCE | test/.generated
 	@echo '$(RELKIND_HEADER)' | cmp -s - "$@" 2>/dev/null || echo '$(RELKIND_HEADER)' > "$@"
 
 # Real file target (not .PHONY): regenerate only when the generator, the header
 # file, or the header path change -- not on every `make`. $(wildcard ...) yields
 # no prereq (rather than an error) when the header is absent, in which case
 # gen-relkinds.sh emits an empty view.
-$(RELKIND_SRC): test/gen-relkinds.sh $(RELKIND_STAMP) $(wildcard $(RELKIND_HEADER)) | test/generated
+$(RELKIND_SRC): test/gen-relkinds.sh $(RELKIND_STAMP) $(wildcard $(RELKIND_HEADER)) | test/.generated
 	test/gen-relkinds.sh "$(RELKIND_HEADER)" > "$@"
 
 .PHONY: gen-relkinds
 gen-relkinds: $(RELKIND_SRC)
 
-# The `| test/generated` on the two targets above is an ORDER-ONLY prerequisite:
-# the generated files live in this directory, which must exist before we write
-# them, but we must NOT rebuild them just because the directory changed. A
-# directory's mtime bumps every time any file is added to or removed from it, so
-# as a normal prerequisite it would force needless regeneration on every run.
-# Listing it after `|` means "ensure it exists, but its timestamp is not a
-# rebuild trigger."
-test/generated:
-	@mkdir -p $@
 testdeps: $(RELKIND_SRC)
 EXTRA_CLEAN += $(RELKIND_SRC) $(RELKIND_STAMP)
 

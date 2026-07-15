@@ -86,7 +86,7 @@ SELECT is(cat_tools.relation__kind(relkind)::text, kind, format('SELECT cat_tool
  *     (see gen-relkinds.sh) and the empty set is trivially contained, so
  *     `make test` passes identically with or without postgresql-server-dev-NN.
  */
-\i test/generated/pg_class_relkinds.sql
+\i test/.generated/pg_class_relkinds.sql
 
 SELECT set_has(
   $$SELECT relkind FROM kinds$$
