@@ -23,7 +23,7 @@ ok 20 - SELECT cat_tools.relation_type('f')
 ok 21 - SELECT cat_tools.relation_type('m')
 ok 22 - SELECT cat_tools.relation_type('p')
 ok 23 - SELECT cat_tools.relation_type('I')
-ok 24 - pg_class.h defines no relkind missing from this test's data set
+ok 24 - cat_tools handles every relkind defined in pg_class.h
 ok 25 - Verify public has no perms
 ok 26 - pg_catalog.pg_class is not a temp relation
 ok 27 - Create temp table for testing
