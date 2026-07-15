@@ -4,6 +4,23 @@
 
 After pushing to a branch with an open PR, monitor CI using `gh pr checks --watch` in a background subagent until all jobs pass or a failure is confirmed. Investigate and fix failures immediately rather than leaving them for the user to notice.
 
+## Build/test system (pgxntool)
+
+This repo's build is driven by pgxntool (embedded under `pgxntool/`). Its docs are
+**not** auto-loaded, so for any non-trivial build or test work, read `pgxntool/README.asc`
+and `pgxntool/CLAUDE.md` first. High-value gotchas that those docs explain:
+
+- `DATA`, `MODULES`, `DOCS`, and `installcheck` are PGXS variables/targets, not
+  pgxntool's; pgxntool only wraps/seeds them. Don't assume they belong to pgxntool.
+- `make test` does **not** return non-zero on test regressions — pgxntool marks
+  `installcheck` as `.IGNORE`. To actually detect failures, use `make verify-results`
+  (or inspect `test/regression.diffs`). This is why CI must gate on `verify-results`.
+- `test/install/*.sql` runs once, committed, before the suite in the same `pg_regress`
+  invocation, so its state persists into every test. `test/build/*.sql` are separate
+  build sanity checks run before the suite.
+- Versioned `.sql` files are generated from their `.sql.in` sources and gitignored.
+  Anything referencing them at Make parse time is subject to two-phase-make timing.
+
 ## Bug Fixes
 
 When fixing a bug, add a comment at the fix site explaining what the bug was and why the fix works. The goal is to prevent re-introducing the bug later.
