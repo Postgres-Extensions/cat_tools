@@ -19,7 +19,7 @@ SELECT plan(
   + 1 -- verify trigger__args_as_array()
 );
 
-SET LOCAL ROLE :no_use_role;
+SET LOCAL ROLE :"no_use_role";
 
 SELECT throws_ok(
       format(
@@ -34,7 +34,7 @@ SELECT throws_ok(
   FROM unnest(:function_array) f
 ;
 
-SET LOCAL ROLE :use_role;
+SET LOCAL ROLE :"use_role";
 
 CREATE TEMP TABLE "test table"();
 

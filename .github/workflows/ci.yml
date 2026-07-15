@@ -16,7 +16,7 @@ jobs:
   test:
     strategy:
       matrix:
-        pg: [18, 17, 16, 15, 14, 13, 12, 11, 10]
+        pg: [18, 17, 16, 15, 14, 13, 12]
     name: 🐘 PostgreSQL ${{ matrix.pg }}
     runs-on: ubuntu-latest
     container: pgxn/pgxn-tools
@@ -25,23 +25,26 @@ jobs:
         run: pg-start ${{ matrix.pg }}
       - name: Check out the repo
         uses: actions/checkout@v6
-      - name: Install rsync
-        run: apt-get install -y rsync
+      - name: Install rsync and server headers
+        # postgresql-server-dev-NN provides catalog/pg_class.h, which
+        # test/gen-relkinds.sh reads for the relkind drift check in
+        # test/sql/relation__.sql.
+        run: apt-get install -y rsync postgresql-server-dev-${{ matrix.pg }}
       - name: Test on PostgreSQL ${{ matrix.pg }}
-        run: make test
+        run: |
+          # Fail if the relkind drift source is empty (headers missing): the
+          # drift check must actually run on every version, not pass silently.
+          make check-relkind-source
+          make test
+          # `make test` never exits non-zero on regressions (pgxntool marks
+          # installcheck `.IGNORE`), so gate the build explicitly on the
+          # pgtap/regression.diffs check or failures would pass silently.
+          make verify-results
 
   pg-upgrade-test:
     strategy:
       matrix:
         include:
-          - old_pg: "10"
-            new_pg: "11"
-          - old_pg: "10"
-            new_pg: "18"
-          - old_pg: "11"
-            new_pg: "12"
-          - old_pg: "11"
-            new_pg: "18"
           - old_pg: "12"
             new_pg: "13"
           - old_pg: "12"
@@ -68,6 +71,11 @@ jobs:
           pg_isready -t 30
       - name: Check out the repo
         uses: actions/checkout@v6
+      - name: Set expected extension version
+        run: |
+          EXPECTED_VERSION="$(sed -n "s/^default_version = '\(.*\)'$/\1/p" cat_tools.control)"
+          test -n "$EXPECTED_VERSION" || { echo "Failed to parse default_version from cat_tools.control"; exit 1; }
+          echo "EXPECTED_VERSION=$EXPECTED_VERSION" >> "$GITHUB_ENV"
       - name: Install rsync
         run: apt-get install -y rsync
       - name: Install cat_tools into old cluster
@@ -104,9 +112,13 @@ jobs:
         run: |
           VERSION=$(psql -tAc "SELECT extversion FROM pg_extension WHERE extname = 'cat_tools'")
           echo "Extension version: ${VERSION:-<not found>}"
-          echo "$VERSION" | grep -q "0.2.2"
+          test -n "$VERSION" || { echo "cat_tools extension version not found after upgrade"; exit 1; }
+          [ "$VERSION" = "$EXPECTED_VERSION" ]
       - name: Run test suite on upgraded cluster
-        run: make test
+        run: |
+          make test
+          # See note in the "test" job: make test does not fail on regressions.
+          make verify-results
       # TODO: also test ALTER EXTENSION cat_tools UPDATE here, once the
       # pg_upgrade source versions (e.g. 0.2.0) can install on the new_pg
       # version. Currently the pre-0.2.2 install scripts fail on PG11+ so
@@ -115,17 +127,17 @@ jobs:
   extension-update-test:
     strategy:
       matrix:
-        # Restricted to PG10 only because the pre-0.2.2 install scripts use
-        # unqualified SELECT * in views over pg_attribute/pg_constraint:
-        #   - PG11 added attmissingval (pseudo-type anyarray) to pg_attribute,
-        #     so cat_tools--0.2.0.sql and cat_tools--0.2.1.sql fail on PG11+
-        #     with "column attmissingval has pseudo-type anyarray".
-        #   - PG12 made the `oid` system column visible in SELECT *, causing
-        #     "column oid specified more than once" on PG12+.
-        # PG10 is the only version where both old scripts install cleanly.
-        # TODO: when a future version's install script works on PG11+, expand
-        # this matrix and add tests for the upgrade path from 0.2.2 onwards.
-        pg: [10]
+        # Exercise the WIDEST update path we can on every supported version:
+        # install the oldest cat_tools version that still installs on the
+        # supported PostgreSQL range and update to the CURRENT version. 0.2.2 is
+        # that floor purely for backward-compat reasons — the 0.2.0/0.2.1 (and
+        # earlier) install scripts fail on PG11+/PG12+, so they cannot be the
+        # starting point here. PG12 is the PostgreSQL floor: the update runs
+        # `ALTER TYPE ... ADD VALUE`, which PG11 and below cannot run inside an
+        # extension update script (the restriction was lifted in PG12). There is
+        # no upper bound. (PG10/11 are dropped; the 0.2.0/0.2.1 update paths
+        # required them and can no longer be tested.)
+        pg: [18, 17, 16, 15, 14, 13, 12]
     name: ⬆️ Extension update test on PostgreSQL ${{ matrix.pg }}
     runs-on: ubuntu-latest
     container: pgxn/pgxn-tools
@@ -134,27 +146,31 @@ jobs:
         run: pg-start ${{ matrix.pg }}
       - name: Check out the repo
         uses: actions/checkout@v6
-      - name: Install rsync
-        run: apt-get install -y rsync
+      - name: Install rsync and server headers
+        # server-dev provides catalog/pg_class.h for the relkind drift check
+        # (see the "test" job); required so check-relkind-source below passes.
+        run: apt-get install -y rsync postgresql-server-dev-${{ matrix.pg }}
       - name: Install cat_tools (all versions)
         run: make install
-      - name: Test upgrade from 0.2.0 (direct 0.2.0→0.2.2 path)
+      - name: Run test suite against the upgraded (oldest→current) database
+        # TEST_LOAD_SOURCE=upgrade makes the pgTAP suite load the extension via
+        # CREATE EXTENSION VERSION '0.2.2' + ALTER EXTENSION UPDATE to the
+        # current version (committed, before the suite, by test/install/load.sql)
+        # instead of a fresh CREATE EXTENSION. Running the SAME suite with the
+        # SAME expected output asserts an upgraded database behaves identically
+        # to a fresh install; a broken or incomplete update makes the suite fail,
+        # so this subsumes the old inline createdb/CREATE/ALTER/version-check
+        # steps. The committed upgrade is required because the update to the
+        # current version uses ALTER TYPE ... ADD VALUE, whose new values cannot
+        # be used in the same transaction (see test/install/load.sql). `make
+        # install` (all versions) already ran above, so the update scripts exist.
+        env:
+          TEST_LOAD_SOURCE: upgrade
         run: |
-          psql -c "CREATE EXTENSION cat_tools VERSION '0.2.0'"
-          psql -c "ALTER EXTENSION cat_tools UPDATE"
-          VERSION=$(psql -tAc "SELECT extversion FROM pg_extension WHERE extname = 'cat_tools'")
-          echo "Version after 0.2.0 upgrade: ${VERSION:-<not found>}"
-          echo "$VERSION" | grep -q "0.2.2"
-      - name: Test upgrade from 0.2.1 (0.2.1→0.2.2 path)
-        run: |
-          createdb cat_tools_from_021
-          psql -d cat_tools_from_021 -c "CREATE EXTENSION cat_tools VERSION '0.2.1'"
-          psql -d cat_tools_from_021 -c "ALTER EXTENSION cat_tools UPDATE"
-          VERSION=$(psql -d cat_tools_from_021 -tAc "SELECT extversion FROM pg_extension WHERE extname = 'cat_tools'")
-          echo "Version after 0.2.1 upgrade: ${VERSION:-<not found>}"
-          echo "$VERSION" | grep -q "0.2.2"
-      - name: Run test suite on updated extension
-        run: make test
+          make check-relkind-source
+          make test
+          # See note in the "test" job: make test does not fail on regressions.
+          make verify-results
 
   # A single stable check name for use as a required status check in branch
   # protection rules. Matrix jobs produce check names like "🐘 PostgreSQL 14"

@@ -75,7 +75,7 @@ END;
  * END tests to run as owner
  */
 
-SET LOCAL ROLE :no_use_role;
+SET LOCAL ROLE :"no_use_role";
 
 SELECT CASE
   WHEN pg_temp.major() < 903 THEN
@@ -96,7 +96,7 @@ SELECT CASE
   FROM views
 ;
 
-SET LOCAL ROLE :use_role;
+SET LOCAL ROLE :"use_role";
 
 \i test/pgxntool/finish.sql
 

@@ -1,11 +1,14 @@
 \set ECHO none
-1..8
-ok 1 - Verify public has no perms
-ok 2 - Verify public has no perms
-ok 3 - Verify function__arg_types() with INOUT and OUT
-ok 4 - Verify function__arg_types() with just INOUT
-ok 5 - Verify function__arg_types() with just OUT
-ok 6 - Verify function__arg_types() with only inputs
-ok 7 - Create pg_temp.test_function(anyarray, OUT text, OUT "char", pg_class, int, VARIADIC boolean[])
-ok 8 - Verify regprocedure()
+1..7
+ok 1 - Function _cat_tools.function__arg_to_regprocedure(text, text, text) should not be security definer
+ok 2 - Function _cat_tools.function__drop_temp(regprocedure, text) should not be security definer
+ok 3 - Verify regprocedure()
+WARNING:  function__arg_types() is deprecated, use routine__parse_arg_types instead
+ok 4 - Verify deprecated function__arg_types() with INOUT and OUT
+WARNING:  function__arg_types() is deprecated, use routine__parse_arg_types instead
+ok 5 - Verify deprecated function__arg_types() with simple args
+WARNING:  function__arg_types_text() is deprecated, use routine__parse_arg_types_text instead
+ok 6 - Verify deprecated function__arg_types_text() with INOUT and OUT
+WARNING:  function__arg_types_text() is deprecated, use routine__parse_arg_types_text instead
+ok 7 - Verify deprecated function__arg_types_text() with simple args
 # TRANSACTION INTENTIONALLY LEFT OPEN!

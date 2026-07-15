@@ -1,4 +1,4 @@
 comment = 'Tools for intorfacing with the catalog'
-default_version = '0.2.2'
+default_version = '0.3.0'
 relocatable = false
 schema = 'cat_tools'

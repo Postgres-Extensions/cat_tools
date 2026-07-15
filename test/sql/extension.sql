@@ -4,7 +4,7 @@
 
 -- test_role is set in test/deps.sql
 
-SET LOCAL ROLE :use_role;
+SET LOCAL ROLE :"use_role";
 
 SELECT plan(
   0
