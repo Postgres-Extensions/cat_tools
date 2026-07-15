@@ -22,7 +22,7 @@
     "X_comment": "Optional. \"description\": A longer description of the distribution. http://pgxn.org/spec/#description",
 
     "X_comment": "REQUIRED. Contact info for distribution maintainers. http://pgxn.org/spec/#maintainer",
-    "maintainer": [ "Jim Nasby <Jim.Nasby@BlueTreble.com>" ],
+    "maintainer": [ "Jim Nasby <Jim.Nasby@gmail.com>" ],
 
     "X_comment": "Optional. Status of distribution. Allowed values: unstable, testing, stable",
     "release_status": "stable",
