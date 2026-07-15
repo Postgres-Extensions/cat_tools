@@ -85,14 +85,14 @@ RELKIND_STAMP = test/generated/.relkind-header-path
 FORCE:
 
 $(RELKIND_STAMP): FORCE | test/generated
-	@echo '$(RELKIND_HEADER)' | cmp -s - $@ 2>/dev/null || echo '$(RELKIND_HEADER)' > $@
+	@echo '$(RELKIND_HEADER)' | cmp -s - "$@" 2>/dev/null || echo '$(RELKIND_HEADER)' > "$@"
 
 # Real file target (not .PHONY): regenerate only when the generator, the header
 # file, or the header path change -- not on every `make`. $(wildcard ...) yields
 # no prereq (rather than an error) when the header is absent, in which case
 # gen-relkinds.sh emits an empty view.
 $(RELKIND_SRC): test/gen-relkinds.sh $(RELKIND_STAMP) $(wildcard $(RELKIND_HEADER)) | test/generated
-	test/gen-relkinds.sh "$(RELKIND_HEADER)" > $@
+	test/gen-relkinds.sh "$(RELKIND_HEADER)" > "$@"
 
 .PHONY: gen-relkinds
 gen-relkinds: $(RELKIND_SRC)
