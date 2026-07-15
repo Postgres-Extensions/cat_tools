@@ -30,7 +30,9 @@ EXTRA_CLEAN += $B/cat_tools.sql $(versioned_out)
 # we are building against, for the relkind drift check in test/sql/relation__.sql.
 # Regenerated on every test run so it always tracks the active PostgreSQL
 # version; the output is gitignored (per-version). When postgresql-server-dev-NN
-# is not installed the script emits a skip sentinel so `make test` still works.
+# is not installed the script emits an empty view so `make test` still works
+# locally -- but see check-relkind-source below, which CI runs so a missing
+# header can never let the drift check pass silently.
 RELKIND_SRC = test/generated/pg_class_relkinds.sql
 .PHONY: gen-relkinds
 gen-relkinds: test/gen-relkinds.sh | test/generated
@@ -39,6 +41,20 @@ test/generated:
 	@mkdir -p $@
 testdeps: gen-relkinds
 EXTRA_CLEAN += $(RELKIND_SRC)
+
+# Guard for CI: fail if the relkind source has no relkinds (server headers
+# missing), so the drift check in test/sql/relation__.sql cannot silently pass
+# on an empty view. CI runs `make check-relkind-source` before `make test` on
+# every PostgreSQL version; local `make test` stays lenient.
+.PHONY: check-relkind-source
+check-relkind-source: gen-relkinds
+	@grep -q 'RELKIND_' $(RELKIND_SRC) || { \
+	  echo "ERROR: $(RELKIND_SRC) contains no relkinds. postgresql-server-dev-NN"; \
+	  echo "       (catalog/pg_class.h) is not installed, so the relkind drift"; \
+	  echo "       check would pass without actually running. Install it."; \
+	  exit 1; \
+	}
+	@echo "check-relkind-source: $(RELKIND_SRC) is populated"
 
 # Temporary ugly hack for 9.x — remove these two blocks when 9.x support is dropped.
 # $@ is deferred via = and expands to the target name at recipe time.

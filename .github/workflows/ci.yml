@@ -28,10 +28,13 @@ jobs:
       - name: Install rsync and server headers
         # postgresql-server-dev-NN provides catalog/pg_class.h, which
         # test/gen-relkinds.sh reads for the relkind drift check in
-        # test/sql/relation__.sql. Without it that check skips itself.
+        # test/sql/relation__.sql.
         run: apt-get install -y rsync postgresql-server-dev-${{ matrix.pg }}
       - name: Test on PostgreSQL ${{ matrix.pg }}
         run: |
+          # Fail if the relkind drift source is empty (headers missing): the
+          # drift check must actually run on every version, not pass silently.
+          make check-relkind-source
           make test
           # `make test` never exits non-zero on regressions (pgxntool marks
           # installcheck `.IGNORE`), so gate the build explicitly on the
@@ -140,8 +143,10 @@ jobs:
         run: pg-start ${{ matrix.pg }}
       - name: Check out the repo
         uses: actions/checkout@v6
-      - name: Install rsync
-        run: apt-get install -y rsync
+      - name: Install rsync and server headers
+        # server-dev provides catalog/pg_class.h for the relkind drift check
+        # (see the "test" job); required so check-relkind-source below passes.
+        run: apt-get install -y rsync postgresql-server-dev-${{ matrix.pg }}
       - name: Set expected extension version
         run: |
           EXPECTED_VERSION="$(sed -n "s/^default_version = '\(.*\)'$/\1/p" cat_tools.control)"
@@ -160,6 +165,7 @@ jobs:
           [ "$VERSION" = "$EXPECTED_VERSION" ]
       - name: Run test suite on updated extension
         run: |
+          make check-relkind-source
           make test
           # See note in the "test" job: make test does not fail on regressions.
           make verify-results
