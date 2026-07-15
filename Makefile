@@ -97,6 +97,13 @@ $(RELKIND_SRC): test/gen-relkinds.sh $(RELKIND_STAMP) $(wildcard $(RELKIND_HEADE
 .PHONY: gen-relkinds
 gen-relkinds: $(RELKIND_SRC)
 
+# The `| test/generated` on the two targets above is an ORDER-ONLY prerequisite:
+# the generated files live in this directory, which must exist before we write
+# them, but we must NOT rebuild them just because the directory changed. A
+# directory's mtime bumps every time any file is added to or removed from it, so
+# as a normal prerequisite it would force needless regeneration on every run.
+# Listing it after `|` means "ensure it exists, but its timestamp is not a
+# rebuild trigger."
 test/generated:
 	@mkdir -p $@
 testdeps: $(RELKIND_SRC)
