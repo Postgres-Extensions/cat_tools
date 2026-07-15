@@ -164,7 +164,6 @@ define _apply_version_seds
 		{print}' $@.tmp > $@.tmp2 && mv $@.tmp2 $@.tmp
 endef
 
-
 # TODO: refactor the version stuff into a function
 #
 # This initially creates $@.tmp before moving it into place atomically. That's
