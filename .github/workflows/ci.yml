@@ -71,17 +71,18 @@ jobs:
           pg_isready -t 30
       - name: Check out the repo
         uses: actions/checkout@v6
-      - name: Set expected extension version
-        run: |
-          EXPECTED_VERSION="$(sed -n "s/^default_version = '\(.*\)'$/\1/p" cat_tools.control)"
-          test -n "$EXPECTED_VERSION" || { echo "Failed to parse default_version from cat_tools.control"; exit 1; }
-          echo "EXPECTED_VERSION=$EXPECTED_VERSION" >> "$GITHUB_ENV"
       - name: Install rsync
         run: apt-get install -y rsync
       - name: Install cat_tools into old cluster
         run: make install
-      - name: Install cat_tools extension into upgrade test database
-        run: psql -c "CREATE EXTENSION cat_tools"
+      - name: Install cat_tools 0.2.2 into the pg_upgrade test database
+        # Install an OLDER version than current so the post-upgrade ALTER
+        # EXTENSION UPDATE below has real work to do. 0.2.2 is the oldest version
+        # that both installs on the old cluster AND survives binary pg_upgrade:
+        # the pre-0.2.2 views reference catalog columns removed in newer
+        # PostgreSQL, so they cannot be pg_upgraded (fixed for 0.2.2 in the
+        # re-release, https://github.com/Postgres-Extensions/cat_tools/pull/18).
+        run: psql -c "CREATE EXTENSION cat_tools VERSION '0.2.2'"
       - name: Install PostgreSQL ${{ matrix.new_pg }}
         run: apt-get install -y postgresql-${{ matrix.new_pg }} postgresql-server-dev-${{ matrix.new_pg }}
       - name: Install cat_tools into new cluster
@@ -108,36 +109,50 @@ jobs:
                       /var/lib/postgresql/${{ matrix.new_pg }}/test/pg_upgrade_output.d \
                       -name '*.log' 2>/dev/null | sort | xargs -r tail -n +1; exit 1; }
           pg_ctlcluster ${{ matrix.new_pg }} test start
-      - name: Verify extension version after upgrade
+      - name: Update the pg_upgraded extension to the current version
+        # Exercises ALTER EXTENSION UPDATE on genuinely pg_upgraded objects (the
+        # 0.2.2 extension binary pg_upgrade just migrated), running the
+        # version-to-version scripts up to the current version. The 0.2.2 -> 0.3.0
+        # script uses ALTER TYPE ... ADD VALUE, which is why new_pg must be >= 12.
+        run: psql -c "ALTER EXTENSION cat_tools UPDATE"
+      - name: Verify extension version after update
         run: |
-          VERSION=$(psql -tAc "SELECT extversion FROM pg_extension WHERE extname = 'cat_tools'")
-          echo "Extension version: ${VERSION:-<not found>}"
-          test -n "$VERSION" || { echo "cat_tools extension version not found after upgrade"; exit 1; }
-          [ "$VERSION" = "$EXPECTED_VERSION" ]
-      - name: Run test suite on upgraded cluster
+          INSTALLED=$(psql -tAc "SELECT extversion FROM pg_extension WHERE extname = 'cat_tools'")
+          EXPECTED=$(make -s print-PGXNVERSION 2>/dev/null | sed -n 's/.*set to "\(.*\)"$/\1/p')
+          echo "installed=$INSTALLED expected=$EXPECTED"
+          # Assert the pg_upgraded + updated extension reached the version in META.in.json.
+          if [ -z "$INSTALLED" ] || [ -z "$EXPECTED" ] || [ "$INSTALLED" != "$EXPECTED" ]; then
+            echo "FAIL: installed='$INSTALLED' expected='$EXPECTED'"; exit 1
+          fi
+      - name: Run test suite against the pg_upgraded database (existing mode)
+        # Run the suite against the REAL pg_upgraded + updated `test` database,
+        # not a fresh throwaway one: TEST_LOAD_SOURCE=existing makes load.sql
+        # assert (not reinstall) the extension, and --use-existing tells pg_regress
+        # to use `test` instead of dropping/recreating it (which would destroy the
+        # pg_upgraded objects). This is what actually exercises the migrated
+        # objects; a plain `make test` would silently test a fresh install instead.
         run: |
-          make test
+          make test TEST_LOAD_SOURCE=existing CONTRIB_TESTDB=test EXTRA_REGRESS_OPTS=--use-existing
           # See note in the "test" job: make test does not fail on regressions.
           make verify-results
-      # TODO: also test ALTER EXTENSION cat_tools UPDATE here, once the
-      # pg_upgrade source versions (e.g. 0.2.0) can install on the new_pg
-      # version. Currently the pre-0.2.2 install scripts fail on PG11+ so
-      # we cannot pg_upgrade from a cluster that has them installed.
 
   extension-update-test:
     strategy:
       matrix:
-        # Exercise the WIDEST update path we can on every supported version:
-        # install the oldest cat_tools version that still installs on the
-        # supported PostgreSQL range and update to the CURRENT version. 0.2.2 is
-        # that floor purely for backward-compat reasons — the 0.2.0/0.2.1 (and
-        # earlier) install scripts fail on PG11+/PG12+, so they cannot be the
-        # starting point here. PG12 is the PostgreSQL floor: the update runs
-        # `ALTER TYPE ... ADD VALUE`, which PG11 and below cannot run inside an
-        # extension update script (the restriction was lifted in PG12). There is
-        # no upper bound. (PG10/11 are dropped; the 0.2.0/0.2.1 update paths
-        # required them and can no longer be tested.)
-        pg: [18, 17, 16, 15, 14, 13, 12]
+        # PG12+: exercise the WIDEST update path we support — CREATE EXTENSION at
+        # the 0.2.2 backward-compat floor, ALTER EXTENSION UPDATE to the CURRENT
+        # version, and run the full suite against the updated database. 0.2.2 is
+        # the floor because the 0.2.0/0.2.1 install scripts fail on PG11+/PG12+;
+        # PG12 is the PostgreSQL floor because the update runs
+        # `ALTER TYPE ... ADD VALUE`, which PG11 and below cannot run in an
+        # extension update script (lifted in PG12).
+        # PG10: the ONLY version where the pre-0.2.2 install scripts still load,
+        # so the only place the 0.2.0->0.2.2 and 0.2.1->0.2.2 update scripts can
+        # be exercised. They target 0.2.2 (not the current version) and use no
+        # ALTER TYPE ... ADD VALUE, so they run on PG10. The PG10 leg runs only
+        # those two checks — not the current-version suite (0.3.0 needs PG12+).
+        # See the per-step `if` guards.
+        pg: [18, 17, 16, 15, 14, 13, 12, 10]
     name: ⬆️ Extension update test on PostgreSQL ${{ matrix.pg }}
     runs-on: ubuntu-latest
     container: pgxn/pgxn-tools
@@ -149,23 +164,67 @@ jobs:
       - name: Install rsync and server headers
         # server-dev provides catalog/pg_class.h for the relkind drift check
         # (see the "test" job); required so check-relkind-source below passes.
+        # PG10 runs only the legacy-script checks (no suite), so it needs no headers.
+        if: matrix.pg != '10'
         run: apt-get install -y rsync postgresql-server-dev-${{ matrix.pg }}
+      - name: Install rsync
+        if: matrix.pg == '10'
+        run: apt-get install -y rsync
       - name: Install cat_tools (all versions)
         run: make install
-      - name: Run test suite against the upgraded (oldest→current) database
-        # TEST_LOAD_SOURCE=upgrade makes the pgTAP suite load the extension via
-        # CREATE EXTENSION VERSION '0.2.2' + ALTER EXTENSION UPDATE to the
-        # current version (committed, before the suite, by test/install/load.sql)
-        # instead of a fresh CREATE EXTENSION. Running the SAME suite with the
-        # SAME expected output asserts an upgraded database behaves identically
-        # to a fresh install; a broken or incomplete update makes the suite fail,
-        # so this subsumes the old inline createdb/CREATE/ALTER/version-check
-        # steps. The committed upgrade is required because the update to the
-        # current version uses ALTER TYPE ... ADD VALUE, whose new values cannot
-        # be used in the same transaction (see test/install/load.sql). `make
-        # install` (all versions) already ran above, so the update scripts exist.
+      - name: Test update 0.2.0 → 0.2.2 (pre-0.2.2 scripts, PG10 only)
+        # 0.2.0/0.2.1 install only on PG10; their update scripts (which target
+        # 0.2.2) are otherwise never exercised. PG picks the shortest path, so
+        # this uses the direct 0.2.0--0.2.2 script.
+        if: matrix.pg == '10'
+        run: |
+          createdb cat_tools_from_020
+          psql -d cat_tools_from_020 -c "CREATE EXTENSION cat_tools VERSION '0.2.0'"
+          psql -d cat_tools_from_020 -c "ALTER EXTENSION cat_tools UPDATE TO '0.2.2'"
+          INSTALLED=$(psql -d cat_tools_from_020 -tAc "SELECT extversion FROM pg_extension WHERE extname = 'cat_tools'")
+          echo "installed=$INSTALLED"
+          if [ -z "$INSTALLED" ] || [ "$INSTALLED" != "0.2.2" ]; then
+            echo "FAIL: expected 0.2.2, got '$INSTALLED'"; exit 1
+          fi
+      - name: Test update 0.2.1 → 0.2.2 (pre-0.2.2 script, PG10 only)
+        # Start at 0.2.1 so the 0.2.1--0.2.2 script (skipped by the shortest-path
+        # 0.2.0->0.2.2 check above) is exercised directly.
+        if: matrix.pg == '10'
+        run: |
+          createdb cat_tools_from_021
+          psql -d cat_tools_from_021 -c "CREATE EXTENSION cat_tools VERSION '0.2.1'"
+          psql -d cat_tools_from_021 -c "ALTER EXTENSION cat_tools UPDATE TO '0.2.2'"
+          INSTALLED=$(psql -d cat_tools_from_021 -tAc "SELECT extversion FROM pg_extension WHERE extname = 'cat_tools'")
+          echo "installed=$INSTALLED"
+          if [ -z "$INSTALLED" ] || [ "$INSTALLED" != "0.2.2" ]; then
+            echo "FAIL: expected 0.2.2, got '$INSTALLED'"; exit 1
+          fi
+      - name: Test update from 0.2.2 to current
+        # Explicit, build-sourced version assertion for the 0.2.2 -> current path
+        # (PG12+) — the same path the suite step below runs. EXPECTED comes from
+        # the build (META.in.json), and the empty-value guard keeps it from
+        # false-passing if either side fails to resolve.
+        if: matrix.pg != '10'
+        run: |
+          createdb cat_tools_from_022
+          psql -d cat_tools_from_022 -c "CREATE EXTENSION cat_tools VERSION '0.2.2'"
+          psql -d cat_tools_from_022 -c "ALTER EXTENSION cat_tools UPDATE"
+          INSTALLED=$(psql -d cat_tools_from_022 -tAc "SELECT extversion FROM pg_extension WHERE extname = 'cat_tools'")
+          EXPECTED=$(make -s print-PGXNVERSION 2>/dev/null | sed -n 's/.*set to "\(.*\)"$/\1/p')
+          echo "installed=$INSTALLED expected=$EXPECTED"
+          if [ -z "$INSTALLED" ] || [ -z "$EXPECTED" ] || [ "$INSTALLED" != "$EXPECTED" ]; then
+            echo "FAIL: installed='$INSTALLED' expected='$EXPECTED'"; exit 1
+          fi
+      - name: Run test suite against the updated (0.2.2 → current) database
+        # TEST_LOAD_SOURCE=update makes load.sql install 0.2.2 then ALTER EXTENSION
+        # UPDATE to the current version (committed, before the suite) instead of a
+        # fresh CREATE EXTENSION. Reusing the SAME suite and expected output asserts
+        # the updated database behaves identically to a fresh install. The commit
+        # is required because the update uses ALTER TYPE ... ADD VALUE, whose new
+        # values cannot be used in the same transaction (see test/install/load.sql).
+        if: matrix.pg != '10'
         env:
-          TEST_LOAD_SOURCE: upgrade
+          TEST_LOAD_SOURCE: update
         run: |
           make check-relkind-source
           make test

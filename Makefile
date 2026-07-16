@@ -13,51 +13,65 @@ PGXNTOOL_ENABLE_TEST_INSTALL = yes
 #
 # TEST_LOAD_SOURCE selects how load.sql installs the extension:
 #   - fresh (default): CREATE EXTENSION cat_tools (current version).
-#   - upgrade: CREATE EXTENSION at the 0.2.2 backward-compat floor and
-#     ALTER EXTENSION UPDATE to the current version. Running the SAME suite
-#     with the SAME expected output against the upgraded database verifies it
-#     behaves identically to a fresh install.
+#   - update: CREATE EXTENSION at TEST_UPDATE_FROM (default 0.2.2, the
+#     backward-compat floor) then ALTER EXTENSION UPDATE -- to TEST_UPDATE_TO if
+#     set, otherwise to the current version. Running the SAME suite with the SAME
+#     expected output against the updated database verifies it behaves
+#     identically to a fresh install.
+#   - existing: the extension is ALREADY installed in the target database (by a
+#     binary pg_upgrade, or an ALTER EXTENSION UPDATE done outside the suite).
+#     load.sql does not touch it; it only asserts presence + current version and
+#     creates the test roles. Pair with CONTRIB_TESTDB=<db> and
+#     EXTRA_REGRESS_OPTS=--use-existing so pg_regress runs against that database
+#     instead of dropping and recreating a throwaway one.
 #
-# The mode is signalled to load.sql by the cat_tools.test_load_mode placeholder
-# GUC. pg_regress does not forward make variables, but the psql processes it
-# spawns inherit the environment, so PGOPTIONS reaches load.sql.
+# The mode (and the update from/to versions) are signalled to load.sql by
+# placeholder GUCs. pg_regress does not forward make variables, but the psql
+# processes it spawns inherit the environment, so PGOPTIONS reaches load.sql.
 #
-# The GUC is exported UNCONDITIONALLY (with the mode value), so load.sql can read
-# it WITHOUT missing_ok and fail loudly if it did not propagate. Relying on an
-# absent GUC to mean "fresh" is unsafe: a silent break anywhere in the
-# make -> PGOPTIONS -> env -> psql chain would quietly run fresh in place of the
-# intended upgrade test. Making the mode explicit and required removes that trap.
+# The GUCs are exported UNCONDITIONALLY, so load.sql can read them WITHOUT
+# missing_ok and fail loudly if they did not propagate. Relying on an absent GUC
+# to mean "fresh" is unsafe: a silent break anywhere in the
+# make -> PGOPTIONS -> env -> psql chain would quietly run the wrong mode.
 #
-# TEST_LOAD_SOURCE must be exactly `fresh` or `upgrade`; anything else is a hard
-# error at parse time (so e.g. `make test TEST_LOAD_SOURCE=typo` fails fast
-# rather than defaulting).
+# TEST_LOAD_SOURCE must be exactly `fresh`, `update` or `existing`; anything else
+# is a hard error at parse time (so e.g. `make test TEST_LOAD_SOURCE=typo` fails
+# fast rather than defaulting).
 #
-# The upgrade must be committed (which is why it lives in test/install, not in
+# An update must be committed (which is why it lives in test/install, not in
 # deps.sql's per-test transaction): the update to the current version runs
 # ALTER TYPE ... ADD VALUE, and a newly added enum value cannot be USED in the
 # transaction that added it (55P04). See test/install/load.sql.
 #
-# Upgrade mode requires PG12+ (ALTER TYPE ... ADD VALUE cannot run in a
-# transaction at all before PG12); CI restricts it accordingly.
+# update mode requires PG12+ when it targets the current version (ALTER TYPE
+# ... ADD VALUE cannot run in a transaction at all before PG12); CI restricts it
+# accordingly.
 TEST_LOAD_SOURCE ?= fresh
-ifeq ($(filter $(TEST_LOAD_SOURCE),fresh upgrade),)
-$(error TEST_LOAD_SOURCE must be 'fresh' or 'upgrade', got '$(TEST_LOAD_SOURCE)')
+ifeq ($(filter $(TEST_LOAD_SOURCE),fresh update existing),)
+$(error TEST_LOAD_SOURCE must be 'fresh', 'update' or 'existing', got '$(TEST_LOAD_SOURCE)')
 endif
-export PGOPTIONS := $(PGOPTIONS) -c cat_tools.test_load_mode=$(TEST_LOAD_SOURCE)
 
-# Convenience wrapper: `make test-update` == `make test TEST_LOAD_SOURCE=upgrade`.
+# update-mode version range (read by load.sql only in update mode). Empty
+# TEST_UPDATE_TO means "update to the current default_version".
+TEST_UPDATE_FROM ?= 0.2.2
+TEST_UPDATE_TO ?=
+
+export PGOPTIONS := $(PGOPTIONS) -c cat_tools.test_load_mode=$(TEST_LOAD_SOURCE) -c cat_tools.test_update_from=$(TEST_UPDATE_FROM) -c cat_tools.test_update_to=$(TEST_UPDATE_TO)
+
+# Convenience wrapper: `make test-update` == `make test TEST_LOAD_SOURCE=update`.
 # Must recurse (a fresh $(MAKE)) rather than depend on `test`, so the parse-time
-# TEST_LOAD_SOURCE conditional above re-evaluates with upgrade set.
+# TEST_LOAD_SOURCE conditional above re-evaluates with update set.
 .PHONY: test-update
 test-update:
-	$(MAKE) test TEST_LOAD_SOURCE=upgrade
+	$(MAKE) test TEST_LOAD_SOURCE=update
 
 include pgxntool/base.mk
 
 # Versioned SQL is generated from .sql.in at build time. That generation, the
 # DATA list that installs it, and the relkind drift source all live in sql.mk,
 # which documents the GNU Make two-phase (parse vs. recipe) hazards involved
-# (e.g. #28). Include it AFTER base.mk so it can use base.mk/control.mk/PGXS
+# (e.g. https://github.com/Postgres-Extensions/cat_tools/issues/28). Include it
+# AFTER base.mk so it can use base.mk/control.mk/PGXS
 # vars (EXTENSION_VERSION_FILES, PG_CONFIG, MAJORVER, datadir, ...).
 include sql.mk
 

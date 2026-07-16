@@ -8,7 +8,11 @@ After **every** push, monitor GitHub CI in a background subagent until all jobs 
 
 ## Bug Fixes
 
-When fixing a bug, add a comment at the fix site explaining what the bug was and why the fix works. The goal is to prevent re-introducing the bug later.
+Comment the fix where it isn't self-evident, but keep it concise — no novels. Do NOT
+recount the bug's history (what a past version got wrong) UNLESS the same mistake could
+realistically be made again; if it could, briefly state the guard fact that prevents it.
+Never repeat the same comment verbatim in adjacent code — write it once and reference it
+("same as above").
 
 ## Git
 
@@ -16,12 +20,14 @@ When fixing a bug, add a comment at the fix site explaining what the bug was and
 
 **Always open PRs against the main repo** (`Postgres-Extensions/cat_tools`), not a fork.
 
-## Terminology
+## References to PRs and issues in committed files
 
-- **Extension update**: moving from one cat_tools version to another (e.g. `ALTER EXTENSION cat_tools UPDATE`). Always say "update" for this.
-- **PostgreSQL upgrade**: upgrading a PostgreSQL cluster to a newer major version (e.g. `pg_upgrade`, `pg_upgradecluster`). Always say "upgrade" for this.
-
-Never use "upgrade" to describe an extension version change, and never use "update" to describe a PostgreSQL cluster version change.
+Any reference to a GitHub PR or issue inside a **committed file** (SQL/code comments,
+`.github/workflows/ci.yml` comments, `CLAUDE.md`, `test/install/load.sql`, docs) MUST be a
+full URL, e.g. `https://github.com/Postgres-Extensions/cat_tools/issues/28` — never a bare
+`#28` (a bare number is meaningless when the file is read outside GitHub). Referencing by
+number is fine only in GitHub-native text (PR/issue titles and descriptions, review
+comments).
 
 ## SQL file conventions
 
@@ -48,15 +54,36 @@ the update script cannot run inside an extension update script on PG11 or earlie
 that cannot be updated to is not truly supported, PG10 and PG11 support is dropped
 entirely. cat_tools 0.3.0 supports PG12+.
 
-The `extension-update-test` job exercises the widest update path we can — install the
-oldest cat_tools version that still installs on the supported PostgreSQL range and update
-to the current version — on the full `pg: [12..18]` matrix. It runs the pgTAP suite in
-upgrade mode (`make test TEST_LOAD_SOURCE=upgrade`, backed by the committed-once
-`test/install/load.sql`), so a broken or incomplete update makes the suite fail. `0.2.2` is
-the starting floor only for backward-compat: the 0.2.0/0.2.1 (and earlier) install scripts
-fail on PG11+/PG12+, so they cannot be the starting point. PG12 is the PostgreSQL floor —
-PG11 (and PG10) cannot run `ALTER TYPE ... ADD VALUE` in extension update scripts; this
-restriction was lifted in PG12. There is no upper bound.
+### Test-load modes (`TEST_LOAD_SOURCE`)
+
+`test/install/load.sql` installs the suite's dependencies once, committed, before the pgTAP
+suite. The Makefile exports the mode (and update range) as placeholder GUCs via `PGOPTIONS`;
+`TEST_LOAD_SOURCE` must be `fresh`, `update`, or `existing` (anything else is a hard
+parse-time error):
+
+- **fresh** (default): `CREATE EXTENSION cat_tools` at the current version.
+- **update**: `CREATE EXTENSION` at `TEST_UPDATE_FROM` (default `0.2.2`) then
+  `ALTER EXTENSION cat_tools UPDATE` — to `TEST_UPDATE_TO` if set, else to the current
+  version. Running the SAME suite/expected output asserts an updated database behaves
+  identically to a fresh install. `make test-update` is the shorthand.
+- **existing**: the extension is ALREADY installed (by binary `pg_upgrade`, or an
+  `ALTER EXTENSION UPDATE` performed outside the suite). load.sql does not touch it; it only
+  asserts presence + current version and creates the test roles. Pair with
+  `CONTRIB_TESTDB=<db> EXTRA_REGRESS_OPTS=--use-existing` so `pg_regress` runs against that
+  database instead of dropping/recreating a throwaway one.
+
+### CI jobs
+
+- `extension-update-test` exercises the widest update path we support — `0.2.2` → current
+  in `update` mode — on `pg: [12..18]`, plus a PG10-only leg that exercises the pre-0.2.2
+  update scripts (`0.2.0`→`0.2.2` and `0.2.1`→`0.2.2`, which install only on PG10 and target
+  `0.2.2`, not the current version). `0.2.2` is the update-from floor only for backward-compat:
+  the 0.2.0/0.2.1 install scripts fail on PG11+/PG12+. PG12 is the PostgreSQL floor — PG11 and
+  earlier cannot run `ALTER TYPE ... ADD VALUE` in extension update scripts (lifted in PG12).
+- `pg-upgrade-test` installs `0.2.2` on the old cluster, binary `pg_upgrade`s it, then
+  `ALTER EXTENSION UPDATE`s to the current version and runs the suite against the REAL
+  pg_upgraded database in `existing` mode (`0.2.2` is the oldest version that survives
+  pg_upgrade — pre-0.2.2 views reference catalog columns removed in newer PostgreSQL).
 
 ## Code Style
 
@@ -71,3 +98,8 @@ Always use block comment format for multi-line comments in SQL files:
 ```
 
 Never use `--` line comments for multi-line explanations.
+
+### Terminology
+"upgrade" refers to a PostgreSQL cluster (`pg_upgrade`); "update" refers to an extension
+(`ALTER EXTENSION ... UPDATE`). cat_tools' version-to-version scripts are "update scripts" —
+never "upgrade scripts."
