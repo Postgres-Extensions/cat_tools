@@ -136,7 +136,7 @@ jobs:
         #     "column oid specified more than once" on PG12+.
         # PG10 is the only version where both old scripts install cleanly.
         # TODO: when a future version's install script works on PG11+, expand
-        # this matrix and add tests for the upgrade path from 0.2.2 onwards.
+        # this matrix and add tests for the update path from 0.2.2 onwards.
         pg: [10]
     name: ⬆️ Extension update test on PostgreSQL ${{ matrix.pg }}
     runs-on: ubuntu-latest
@@ -150,7 +150,7 @@ jobs:
         run: apt-get install -y rsync
       - name: Install cat_tools (all versions)
         run: make install
-      - name: Test upgrade from 0.2.0
+      - name: Test update from 0.2.0
         run: |
           psql -c "CREATE EXTENSION cat_tools VERSION '0.2.0'"
           psql -c "ALTER EXTENSION cat_tools UPDATE"
@@ -161,10 +161,10 @@ jobs:
           # stderr is discarded to drop a pre-existing, unrelated make warning.
           INSTALLED=$(psql -tAc "SELECT extversion FROM pg_extension WHERE extname = 'cat_tools'")
           EXPECTED=$(make -s print-EXTENSION_cat_tools_VERSION 2>/dev/null | sed -n 's/.*set to "\(.*\)"$/\1/p')
-          echo "Installed version after 0.2.0 upgrade: ${INSTALLED:-<not found>}"
+          echo "Installed version after 0.2.0 update: ${INSTALLED:-<not found>}"
           echo "Expected (build) version: ${EXPECTED:-<not found>}"
           test "$INSTALLED" = "$EXPECTED"
-      - name: Test upgrade from 0.2.1
+      - name: Test update from 0.2.1
         run: |
           createdb cat_tools_from_021
           psql -d cat_tools_from_021 -c "CREATE EXTENSION cat_tools VERSION '0.2.1'"
@@ -176,7 +176,7 @@ jobs:
           # stderr is discarded to drop a pre-existing, unrelated make warning.
           INSTALLED=$(psql -d cat_tools_from_021 -tAc "SELECT extversion FROM pg_extension WHERE extname = 'cat_tools'")
           EXPECTED=$(make -s print-EXTENSION_cat_tools_VERSION 2>/dev/null | sed -n 's/.*set to "\(.*\)"$/\1/p')
-          echo "Installed version after 0.2.1 upgrade: ${INSTALLED:-<not found>}"
+          echo "Installed version after 0.2.1 update: ${INSTALLED:-<not found>}"
           echo "Expected (build) version: ${EXPECTED:-<not found>}"
           test "$INSTALLED" = "$EXPECTED"
       - name: Run test suite on updated extension
