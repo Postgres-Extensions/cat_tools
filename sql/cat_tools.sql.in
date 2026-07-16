@@ -67,7 +67,7 @@ CREATE OR REPLACE VIEW _cat_tools.pg_class_v AS
       LEFT JOIN pg_namespace n ON( n.oid = c.relnamespace )
 ;
 $fmt$
-  , __cat_tools.omit_column('pg_catalog.pg_class')
+  , __cat_tools.omit_column('pg_catalog.pg_class', array['oid', 'relhasoids', 'relhaspkey'])
 ));
 REVOKE ALL ON _cat_tools.pg_class_v FROM public;
 
@@ -766,7 +766,7 @@ $fmt$
    * attmissingval is explicitly included above (cast to text[] via SED markers).
    * Omit it here so it doesn't appear twice, and omit oid to avoid conflicts on PG12+.
    */
-  , __cat_tools.omit_column('pg_catalog.pg_attribute', array['oid', 'attmissingval'])
+  , __cat_tools.omit_column('pg_catalog.pg_attribute', array['oid', 'attmissingval', 'attcacheoff'])
   , __cat_tools.omit_column('pg_catalog.pg_type')
 ));
 REVOKE ALL ON _cat_tools.pg_attribute_v FROM public;
