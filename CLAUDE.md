@@ -80,10 +80,15 @@ parse-time error):
   `0.2.2`, not the current version). `0.2.2` is the update-from floor only for backward-compat:
   the 0.2.0/0.2.1 install scripts fail on PG11+/PG12+. PG12 is the PostgreSQL floor — PG11 and
   earlier cannot run `ALTER TYPE ... ADD VALUE` in extension update scripts (lifted in PG12).
-- `pg-upgrade-test` installs `0.2.2` on the old cluster, binary `pg_upgrade`s it, then
-  `ALTER EXTENSION UPDATE`s to the current version and runs the suite against the REAL
-  pg_upgraded database in `existing` mode (`0.2.2` is the oldest version that survives
-  pg_upgrade — pre-0.2.2 views reference catalog columns removed in newer PostgreSQL).
+- `pg-upgrade-test` binary-`pg_upgrade`s a real database and then runs the suite against it
+  in `existing` mode (`0.2.2` is the oldest version that survives pg_upgrade — pre-0.2.2
+  views reference catalog columns removed in newer PostgreSQL). Two shapes:
+  - `old_pg>=11`: install `0.2.2` directly → plant guard → pg_upgrade → update to current.
+  - `old_pg=10`: the FULL real-world journey — install `0.2.0`, **bridge-update to `0.2.2` on
+    the old cluster** (the `0.2.0`→`0.2.2` script recreates the views with the pg_upgrade-safe
+    omit_column fix) → plant guard → pg_upgrade → update to current. This proves a `0.2.2`
+    reached via the bridge update (not a fresh install) survives pg_upgrade.
+  Both flows plant the dependency guard and run through `test/ci/existing_mode.sh`.
 
 ## Code Style
 

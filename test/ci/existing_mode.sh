@@ -120,6 +120,25 @@ case "$cmd" in
     # update DB [TO_VERSION]   (empty TO_VERSION => update to current)
     update_ext "$1" "${2:-}"
     ;;
+  prepare-old)
+    # prepare-old DB INSTALL_VERSION [BRIDGE_TO]
+    #   Old-cluster preparation for pg-upgrade-test. Create the database and the
+    #   extension at INSTALL_VERSION; if BRIDGE_TO is given, ALTER EXTENSION
+    #   UPDATE TO it first. That "bridge" models the real migration path a user
+    #   on an OLD PostgreSQL + OLD cat_tools must take: e.g. on PG10, install
+    #   0.2.0 then update to 0.2.2 BEFORE pg_upgrade, because the 0.2.0->0.2.2
+    #   script recreates the views with the pg_upgrade-safe omit_column fix
+    #   (https://github.com/Postgres-Extensions/cat_tools/pull/18) -- the raw
+    #   0.2.0 views reference catalog columns removed in newer PostgreSQL and
+    #   would break binary pg_upgrade. Then plant + prove the dependency guard
+    #   (at the bridged version, so cat_tools.relation_type exists).
+    db=$1 install=$2 bridge=${3:-}
+    createdb "$db"
+    psql -d "$db" -v ON_ERROR_STOP=1 -c "CREATE EXTENSION cat_tools VERSION '$install'"
+    # Use `if`, not `&&`: under `set -e` a false `[ -n ... ] && ...` would abort.
+    if [ -n "$bridge" ]; then update_ext "$db" "$bridge"; fi
+    plant_guard "$db"
+    ;;
   run-suite)
     # run-suite DB   (extension must already be at the current version)
     run_suite "$1"
@@ -148,7 +167,7 @@ case "$cmd" in
     assert_version "$db" "$to"
     ;;
   *)
-    echo "usage: $0 {plant-guard|update|run-suite|update-scenario|update-check} ..." >&2
+    echo "usage: $0 {plant-guard|update|prepare-old|run-suite|update-scenario|update-check} ..." >&2
     exit 2
     ;;
 esac

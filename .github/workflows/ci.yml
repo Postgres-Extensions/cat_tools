@@ -45,10 +45,28 @@ jobs:
     strategy:
       matrix:
         include:
+          # old_pg=10: the FULL real-world journey for a user on old PostgreSQL +
+          # old cat_tools. 0.2.0 installs on PG10; the BRIDGE update to 0.2.2
+          # (run on PG10, before pg_upgrade) recreates the views with the
+          # pg_upgrade-safe omit_column fix so the binary pg_upgrade to a newer
+          # cluster succeeds; then update to current + run the suite. This proves
+          # a 0.2.2 reached via the bridge update (not a fresh install) survives
+          # pg_upgrade and updates to latest.
+          - old_pg: "10"
+            new_pg: "18"
+            old_install: "0.2.0"
+            bridge_to: "0.2.2"
+          # old_pg>=11: 0.2.0/0.2.1 do not install on PG11+, and such users are
+          # already on 0.2.2+. Install 0.2.2 directly (no bridge), pg_upgrade,
+          # then update to current.
           - old_pg: "12"
             new_pg: "13"
+            old_install: "0.2.2"
+            bridge_to: ""
           - old_pg: "12"
             new_pg: "18"
+            old_install: "0.2.2"
+            bridge_to: ""
     name: 🔄 Binary pg_upgrade ${{ matrix.old_pg }} → ${{ matrix.new_pg }}
     runs-on: ubuntu-latest
     container: pgxn/pgxn-tools
@@ -75,20 +93,17 @@ jobs:
         run: apt-get install -y rsync
       - name: Install cat_tools into old cluster
         run: make install
-      - name: Create the pg_upgrade test database (cat_tools 0.2.2 + dependency guard)
-        # Install an OLDER version than current so the post-upgrade ALTER
-        # EXTENSION UPDATE below has real work to do. 0.2.2 is the oldest version
-        # that both installs on the old cluster AND survives binary pg_upgrade:
-        # the pre-0.2.2 views reference catalog columns removed in newer
-        # PostgreSQL, so they cannot be pg_upgraded (fixed for 0.2.2 in the
-        # re-release, https://github.com/Postgres-Extensions/cat_tools/pull/18).
-        # plant-guard adds a hard dependency on a cat_tools member (and proves a
-        # non-CASCADE DROP EXTENSION now fails) so the later existing-mode run
-        # cannot silently drop+reinstall and test a fresh install instead.
-        run: |
-          createdb cat_tools_upgrade
-          psql -d cat_tools_upgrade -c "CREATE EXTENSION cat_tools VERSION '0.2.2'"
-          test/ci/existing_mode.sh plant-guard cat_tools_upgrade
+      - name: Prepare the old cluster (install + bridge + dependency guard)
+        # prepare-old installs cat_tools at old_install and, when bridge_to is set
+        # (old_pg=10), ALTER EXTENSION UPDATEs to it BEFORE pg_upgrade -- the
+        # bridge that makes the views pg_upgrade-safe (see prepare-old in the
+        # script). It then plants + proves the dependency guard so the later
+        # existing-mode run cannot silently drop+reinstall and test a fresh
+        # install instead. The extension is always older than current, so the
+        # post-upgrade ALTER EXTENSION UPDATE has real work to do.
+        run: >-
+          test/ci/existing_mode.sh prepare-old cat_tools_upgrade
+          "${{ matrix.old_install }}" "${{ matrix.bridge_to }}"
       - name: Install PostgreSQL ${{ matrix.new_pg }}
         run: apt-get install -y postgresql-${{ matrix.new_pg }} postgresql-server-dev-${{ matrix.new_pg }}
       - name: Install cat_tools into new cluster
