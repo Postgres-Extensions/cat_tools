@@ -102,9 +102,15 @@ jobs:
           pg_ctlcluster ${{ matrix.new_pg }} test start
       - name: Verify extension version after upgrade
         run: |
-          VERSION=$(psql -tAc "SELECT extversion FROM pg_extension WHERE extname = 'cat_tools'")
-          echo "Extension version: ${VERSION:-<not found>}"
-          echo "$VERSION" | grep -q "0.2.2"
+          # Assert the installed version matches the extension's current
+          # default_version reported by PostgreSQL itself, rather than a
+          # hardcoded literal. This keeps the test release-agnostic: it proves
+          # the extension is at the current version without editing on release.
+          INSTALLED=$(psql -tAc "SELECT extversion FROM pg_extension WHERE extname = 'cat_tools'")
+          EXPECTED=$(psql -tAc "SELECT default_version FROM pg_available_extensions WHERE name = 'cat_tools'")
+          echo "Installed version: ${INSTALLED:-<not found>}"
+          echo "Expected (default) version: ${EXPECTED:-<not found>}"
+          test "$INSTALLED" = "$EXPECTED"
       - name: Run test suite on upgraded cluster
         run: make test
       # TODO: also test ALTER EXTENSION cat_tools UPDATE here, once the
@@ -138,21 +144,31 @@ jobs:
         run: apt-get install -y rsync
       - name: Install cat_tools (all versions)
         run: make install
-      - name: Test upgrade from 0.2.0 (direct 0.2.0→0.2.2 path)
+      - name: Test upgrade from 0.2.0
         run: |
           psql -c "CREATE EXTENSION cat_tools VERSION '0.2.0'"
           psql -c "ALTER EXTENSION cat_tools UPDATE"
-          VERSION=$(psql -tAc "SELECT extversion FROM pg_extension WHERE extname = 'cat_tools'")
-          echo "Version after 0.2.0 upgrade: ${VERSION:-<not found>}"
-          echo "$VERSION" | grep -q "0.2.2"
-      - name: Test upgrade from 0.2.1 (0.2.1→0.2.2 path)
+          # Assert UPDATE reached the extension's current default_version, as
+          # reported by PostgreSQL, rather than a hardcoded literal. This keeps
+          # the update test release-agnostic.
+          INSTALLED=$(psql -tAc "SELECT extversion FROM pg_extension WHERE extname = 'cat_tools'")
+          EXPECTED=$(psql -tAc "SELECT default_version FROM pg_available_extensions WHERE name = 'cat_tools'")
+          echo "Installed version after 0.2.0 upgrade: ${INSTALLED:-<not found>}"
+          echo "Expected (default) version: ${EXPECTED:-<not found>}"
+          test "$INSTALLED" = "$EXPECTED"
+      - name: Test upgrade from 0.2.1
         run: |
           createdb cat_tools_from_021
           psql -d cat_tools_from_021 -c "CREATE EXTENSION cat_tools VERSION '0.2.1'"
           psql -d cat_tools_from_021 -c "ALTER EXTENSION cat_tools UPDATE"
-          VERSION=$(psql -d cat_tools_from_021 -tAc "SELECT extversion FROM pg_extension WHERE extname = 'cat_tools'")
-          echo "Version after 0.2.1 upgrade: ${VERSION:-<not found>}"
-          echo "$VERSION" | grep -q "0.2.2"
+          # Assert UPDATE reached the extension's current default_version, as
+          # reported by PostgreSQL, rather than a hardcoded literal. This keeps
+          # the update test release-agnostic.
+          INSTALLED=$(psql -d cat_tools_from_021 -tAc "SELECT extversion FROM pg_extension WHERE extname = 'cat_tools'")
+          EXPECTED=$(psql -d cat_tools_from_021 -tAc "SELECT default_version FROM pg_available_extensions WHERE name = 'cat_tools'")
+          echo "Installed version after 0.2.1 upgrade: ${INSTALLED:-<not found>}"
+          echo "Expected (default) version: ${EXPECTED:-<not found>}"
+          test "$INSTALLED" = "$EXPECTED"
       - name: Run test suite on updated extension
         run: make test
 
