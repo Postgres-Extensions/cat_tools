@@ -149,17 +149,17 @@ jobs:
           INSTALLED=$(psql -tAc "SELECT extversion FROM pg_extension WHERE extname = 'cat_tools'")
           EXPECTED=$(make -s print-PGXNVERSION 2>/dev/null | sed -n 's/.*set to "\(.*\)"$/\1/p')
           echo "installed=$INSTALLED expected=$EXPECTED"
-          # UPDATE with no target takes the shortest path: direct 0.2.0->0.2.2, so this does NOT
-          # exercise the 0.2.1->0.2.2 script. That path is covered explicitly by the next step.
+          # 0.2.0 -> current; the 0.2.1->0.2.2 script is covered by the next step.
           if [ -z "$INSTALLED" ] || [ -z "$EXPECTED" ] || [ "$INSTALLED" != "$EXPECTED" ]; then
             echo "FAIL: installed='$INSTALLED' expected='$EXPECTED'"; exit 1
           fi
       - name: Test update 0.2.1 → 0.2.2
         run: |
+          # PG takes the shortest update path, so the 0.2.0->current test above goes
+          # direct 0.2.0->0.2.2 and never runs the 0.2.1->0.2.2 script. Start at 0.2.1
+          # and target 0.2.2 explicitly so that script is exercised.
           createdb cat_tools_from_021
           psql -d cat_tools_from_021 -c "CREATE EXTENSION cat_tools VERSION '0.2.1'"
-          # Explicitly target 0.2.2 to exercise the 0.2.1->0.2.2 update script, which the
-          # 0.2.0->current shortest path skips. Fixed historical edge, so the expected value is literal.
           psql -d cat_tools_from_021 -c "ALTER EXTENSION cat_tools UPDATE TO '0.2.2'"
           INSTALLED=$(psql -d cat_tools_from_021 -tAc "SELECT extversion FROM pg_extension WHERE extname = 'cat_tools'")
           echo "installed=$INSTALLED"

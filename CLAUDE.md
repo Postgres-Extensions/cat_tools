@@ -6,10 +6,11 @@ After pushing to a branch with an open PR, monitor CI using `gh pr checks --watc
 
 ## Bug Fixes
 
-Add a comment at a fix site ONLY when the same mistake is likely to be made again — a
-subtle corner case or a non-obvious interaction. State the guard fact that prevents the
-mistake, not the history of the bug. If the fix is self-evident, no comment. Never repeat
-the same comment verbatim in adjacent code — write it once and reference it ("same as above").
+Comment the fix where it isn't self-evident, but keep it concise — no novels. Do NOT
+recount the bug's history (what a past version got wrong) UNLESS the same mistake could
+realistically be made again; if it could, briefly state the guard fact that prevents it.
+Never repeat the same comment verbatim in adjacent code — write it once and reference it
+("same as above").
 
 ## Git
 
@@ -42,7 +43,7 @@ install cleanly:
   "column oid specified more than once".
 
 **When working on a new version:** review and expand this matrix. The new version's install
-script may support more PG versions, enabling testing of the upgrade path from older
+script may support more PG versions, enabling testing of the update path from older
 cat_tools versions on newer PostgreSQL.
 
 ## Code Style
