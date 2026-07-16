@@ -6,7 +6,10 @@ After pushing to a branch with an open PR, monitor CI using `gh pr checks --watc
 
 ## Bug Fixes
 
-When fixing a bug, add a comment at the fix site explaining what the bug was and why the fix works. The goal is to prevent re-introducing the bug later.
+Add a comment at a fix site ONLY when the same mistake is likely to be made again — a
+subtle corner case or a non-obvious interaction. State the guard fact that prevents the
+mistake, not the history of the bug. If the fix is self-evident, no comment. Never repeat
+the same comment verbatim in adjacent code — write it once and reference it ("same as above").
 
 ## Git
 
@@ -21,7 +24,7 @@ Rules for what to track in git:
 0. If a `.sql.in` file exists, track the `.sql.in` and **not** the corresponding `.sql`.
 1. If no `.sql.in` exists, track the `.sql` directly (e.g. historical pre-0.2.0 files).
 2. Version-specific install scripts (e.g. `sql/cat_tools--0.2.2.sql.in`) MUST be tracked.
-3. Upgrade scripts (e.g. `sql/cat_tools--0.2.1--0.2.2.sql.in`) MUST be tracked.
+3. Update scripts (e.g. `sql/cat_tools--0.2.1--0.2.2.sql.in`) MUST be tracked.
 4. The current version'''s install script (e.g. `sql/cat_tools--0.2.2.sql.in`) is generated
    by `make` from `sql/cat_tools.sql.in`, but MUST still be tracked (rule 2 applies).
 5. Version-specific files MUST NEVER be edited manually — always edit `sql/cat_tools.sql.in`
@@ -55,3 +58,8 @@ Always use block comment format for multi-line comments in SQL files:
 ```
 
 Never use `--` line comments for multi-line explanations.
+
+### Terminology
+"upgrade" refers to a PostgreSQL cluster (`pg_upgrade`); "update" refers to an extension
+(`ALTER EXTENSION ... UPDATE`). cat_tools' version-to-version scripts are "update scripts" —
+never "upgrade scripts."

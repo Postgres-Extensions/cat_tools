@@ -102,12 +102,13 @@ jobs:
           pg_ctlcluster ${{ matrix.new_pg }} test start
       - name: Verify extension version after upgrade
         run: |
-          # Assert installed version (reported by pg_extension) matches what's specified in META.in.json
           INSTALLED=$(psql -tAc "SELECT extversion FROM pg_extension WHERE extname = 'cat_tools'")
           EXPECTED=$(make -s print-PGXNVERSION 2>/dev/null | sed -n 's/.*set to "\(.*\)"$/\1/p')
-          echo "Installed version: ${INSTALLED:-<not found>}"
-          echo "Expected (build) version: ${EXPECTED:-<not found>}"
-          test "$INSTALLED" = "$EXPECTED"
+          echo "installed=$INSTALLED expected=$EXPECTED"
+          # Assert installed version (reported by pg_extension) matches what's specified in META.in.json
+          if [ -z "$INSTALLED" ] || [ -z "$EXPECTED" ] || [ "$INSTALLED" != "$EXPECTED" ]; then
+            echo "FAIL: installed='$INSTALLED' expected='$EXPECTED'"; exit 1
+          fi
       - name: Run test suite on upgraded cluster
         run: make test
       # TODO: also test ALTER EXTENSION cat_tools UPDATE here, once the
@@ -141,27 +142,30 @@ jobs:
         run: apt-get install -y rsync
       - name: Install cat_tools (all versions)
         run: make install
-      - name: Test update from 0.2.0
+      - name: Test update from 0.2.0 to current
         run: |
           psql -c "CREATE EXTENSION cat_tools VERSION '0.2.0'"
           psql -c "ALTER EXTENSION cat_tools UPDATE"
-          # Assert installed version (reported by pg_extension) matches what's specified in META.in.json
           INSTALLED=$(psql -tAc "SELECT extversion FROM pg_extension WHERE extname = 'cat_tools'")
           EXPECTED=$(make -s print-PGXNVERSION 2>/dev/null | sed -n 's/.*set to "\(.*\)"$/\1/p')
-          echo "Installed version after 0.2.0 update: ${INSTALLED:-<not found>}"
-          echo "Expected (build) version: ${EXPECTED:-<not found>}"
-          test "$INSTALLED" = "$EXPECTED"
-      - name: Test update from 0.2.1
+          echo "installed=$INSTALLED expected=$EXPECTED"
+          # UPDATE with no target takes the shortest path: direct 0.2.0->0.2.2, so this does NOT
+          # exercise the 0.2.1->0.2.2 script. That path is covered explicitly by the next step.
+          if [ -z "$INSTALLED" ] || [ -z "$EXPECTED" ] || [ "$INSTALLED" != "$EXPECTED" ]; then
+            echo "FAIL: installed='$INSTALLED' expected='$EXPECTED'"; exit 1
+          fi
+      - name: Test update 0.2.1 → 0.2.2
         run: |
           createdb cat_tools_from_021
           psql -d cat_tools_from_021 -c "CREATE EXTENSION cat_tools VERSION '0.2.1'"
-          psql -d cat_tools_from_021 -c "ALTER EXTENSION cat_tools UPDATE"
-          # Same as above
+          # Explicitly target 0.2.2 to exercise the 0.2.1->0.2.2 update script, which the
+          # 0.2.0->current shortest path skips. Fixed historical edge, so the expected value is literal.
+          psql -d cat_tools_from_021 -c "ALTER EXTENSION cat_tools UPDATE TO '0.2.2'"
           INSTALLED=$(psql -d cat_tools_from_021 -tAc "SELECT extversion FROM pg_extension WHERE extname = 'cat_tools'")
-          EXPECTED=$(make -s print-PGXNVERSION 2>/dev/null | sed -n 's/.*set to "\(.*\)"$/\1/p')
-          echo "Installed version after 0.2.1 update: ${INSTALLED:-<not found>}"
-          echo "Expected (build) version: ${EXPECTED:-<not found>}"
-          test "$INSTALLED" = "$EXPECTED"
+          echo "installed=$INSTALLED"
+          if [ -z "$INSTALLED" ] || [ "$INSTALLED" != "0.2.2" ]; then
+            echo "FAIL: expected 0.2.2, got '$INSTALLED'"; exit 1
+          fi
       - name: Run test suite on updated extension
         run: make test
 
