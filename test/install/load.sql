@@ -90,6 +90,8 @@ SELECT
  * current default_version -- the pg_upgrade / external update the database just
  * went through is exactly what the suite is validating, so dropping or
  * reinstalling it would defeat the test. Fail loudly on absence or mismatch.
+ * (CI additionally plants a dependency guard so a stray non-CASCADE drop would
+ * error rather than silently reinstall; see test/ci/existing_mode.sh.)
  */
 DO $$
 DECLARE
