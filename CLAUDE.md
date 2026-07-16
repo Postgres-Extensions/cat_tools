@@ -25,7 +25,11 @@ and `pgxntool/CLAUDE.md` first. High-value gotchas that those docs explain:
 
 ## Bug Fixes
 
-When fixing a bug, add a comment at the fix site explaining what the bug was and why the fix works. The goal is to prevent re-introducing the bug later.
+Comment the fix where it isn't self-evident, but keep it concise — no novels. Do NOT
+recount the bug's history (what a past version got wrong) UNLESS the same mistake could
+realistically be made again; if it could, briefly state the guard fact that prevents it.
+Never repeat the same comment verbatim in adjacent code — write it once and reference it
+("same as above").
 
 ## Git
 
@@ -40,7 +44,7 @@ Rules for what to track in git:
 0. If a `.sql.in` file exists, track the `.sql.in` and **not** the corresponding `.sql`.
 1. If no `.sql.in` exists, track the `.sql` directly (e.g. historical pre-0.2.0 files).
 2. Version-specific install scripts (e.g. `sql/cat_tools--0.2.2.sql.in`) MUST be tracked.
-3. Upgrade scripts (e.g. `sql/cat_tools--0.2.1--0.2.2.sql.in`) MUST be tracked.
+3. Update scripts (e.g. `sql/cat_tools--0.2.1--0.2.2.sql.in`) MUST be tracked.
 4. The current version'''s install script (e.g. `sql/cat_tools--0.2.2.sql.in`) is generated
    by `make` from `sql/cat_tools.sql.in`, but MUST still be tracked (rule 2 applies).
 5. Version-specific files MUST NEVER be edited manually — always edit `sql/cat_tools.sql.in`
@@ -58,7 +62,7 @@ install cleanly:
   "column oid specified more than once".
 
 **When working on a new version:** review and expand this matrix. The new version's install
-script may support more PG versions, enabling testing of the upgrade path from older
+script may support more PG versions, enabling testing of the update path from older
 cat_tools versions on newer PostgreSQL.
 
 ## Code Style
@@ -74,3 +78,8 @@ Always use block comment format for multi-line comments in SQL files:
 ```
 
 Never use `--` line comments for multi-line explanations.
+
+### Terminology
+"upgrade" refers to a PostgreSQL cluster (`pg_upgrade`); "update" refers to an extension
+(`ALTER EXTENSION ... UPDATE`). cat_tools' version-to-version scripts are "update scripts" —
+never "upgrade scripts."

@@ -102,9 +102,13 @@ jobs:
           pg_ctlcluster ${{ matrix.new_pg }} test start
       - name: Verify extension version after upgrade
         run: |
-          VERSION=$(psql -tAc "SELECT extversion FROM pg_extension WHERE extname = 'cat_tools'")
-          echo "Extension version: ${VERSION:-<not found>}"
-          echo "$VERSION" | grep -q "0.2.2"
+          INSTALLED=$(psql -tAc "SELECT extversion FROM pg_extension WHERE extname = 'cat_tools'")
+          EXPECTED=$(make -s print-PGXNVERSION 2>/dev/null | sed -n 's/.*set to "\(.*\)"$/\1/p')
+          echo "installed=$INSTALLED expected=$EXPECTED"
+          # Assert installed version (reported by pg_extension) matches what's specified in META.in.json
+          if [ -z "$INSTALLED" ] || [ -z "$EXPECTED" ] || [ "$INSTALLED" != "$EXPECTED" ]; then
+            echo "FAIL: installed='$INSTALLED' expected='$EXPECTED'"; exit 1
+          fi
       - name: Run test suite on upgraded cluster
         run: make test
       # TODO: also test ALTER EXTENSION cat_tools UPDATE here, once the
@@ -124,7 +128,7 @@ jobs:
         #     "column oid specified more than once" on PG12+.
         # PG10 is the only version where both old scripts install cleanly.
         # TODO: when a future version's install script works on PG11+, expand
-        # this matrix and add tests for the upgrade path from 0.2.2 onwards.
+        # this matrix and add tests for the update path from 0.2.2 onwards.
         pg: [10]
     name: ⬆️ Extension update test on PostgreSQL ${{ matrix.pg }}
     runs-on: ubuntu-latest
@@ -138,21 +142,30 @@ jobs:
         run: apt-get install -y rsync
       - name: Install cat_tools (all versions)
         run: make install
-      - name: Test upgrade from 0.2.0 (direct 0.2.0→0.2.2 path)
+      - name: Test update from 0.2.0 to current
         run: |
           psql -c "CREATE EXTENSION cat_tools VERSION '0.2.0'"
           psql -c "ALTER EXTENSION cat_tools UPDATE"
-          VERSION=$(psql -tAc "SELECT extversion FROM pg_extension WHERE extname = 'cat_tools'")
-          echo "Version after 0.2.0 upgrade: ${VERSION:-<not found>}"
-          echo "$VERSION" | grep -q "0.2.2"
-      - name: Test upgrade from 0.2.1 (0.2.1→0.2.2 path)
+          INSTALLED=$(psql -tAc "SELECT extversion FROM pg_extension WHERE extname = 'cat_tools'")
+          EXPECTED=$(make -s print-PGXNVERSION 2>/dev/null | sed -n 's/.*set to "\(.*\)"$/\1/p')
+          echo "installed=$INSTALLED expected=$EXPECTED"
+          # 0.2.0 -> current; the 0.2.1->0.2.2 script is covered by the next step.
+          if [ -z "$INSTALLED" ] || [ -z "$EXPECTED" ] || [ "$INSTALLED" != "$EXPECTED" ]; then
+            echo "FAIL: installed='$INSTALLED' expected='$EXPECTED'"; exit 1
+          fi
+      - name: Test update 0.2.1 → 0.2.2
         run: |
+          # PG takes the shortest update path, so the 0.2.0->current test above goes
+          # direct 0.2.0->0.2.2 and never runs the 0.2.1->0.2.2 script. Start at 0.2.1
+          # and target 0.2.2 explicitly so that script is exercised.
           createdb cat_tools_from_021
           psql -d cat_tools_from_021 -c "CREATE EXTENSION cat_tools VERSION '0.2.1'"
-          psql -d cat_tools_from_021 -c "ALTER EXTENSION cat_tools UPDATE"
-          VERSION=$(psql -d cat_tools_from_021 -tAc "SELECT extversion FROM pg_extension WHERE extname = 'cat_tools'")
-          echo "Version after 0.2.1 upgrade: ${VERSION:-<not found>}"
-          echo "$VERSION" | grep -q "0.2.2"
+          psql -d cat_tools_from_021 -c "ALTER EXTENSION cat_tools UPDATE TO '0.2.2'"
+          INSTALLED=$(psql -d cat_tools_from_021 -tAc "SELECT extversion FROM pg_extension WHERE extname = 'cat_tools'")
+          echo "installed=$INSTALLED"
+          if [ -z "$INSTALLED" ] || [ "$INSTALLED" != "0.2.2" ]; then
+            echo "FAIL: expected 0.2.2, got '$INSTALLED'"; exit 1
+          fi
       - name: Run test suite on updated extension
         run: make test
 
