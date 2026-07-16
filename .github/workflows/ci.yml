@@ -102,14 +102,20 @@ jobs:
           pg_ctlcluster ${{ matrix.new_pg }} test start
       - name: Verify extension version after upgrade
         run: |
-          # Assert the installed version matches the extension's current
-          # default_version reported by PostgreSQL itself, rather than a
-          # hardcoded literal. This keeps the test release-agnostic: it proves
-          # the extension is at the current version without editing on release.
+          # Assert the DB-reported installed version matches the version that
+          # was built, rather than a hardcoded literal. EXPECTED comes from the
+          # build (make), NOT from psql/pg_available_extensions: deriving the
+          # expected value from the same install being validated would let a
+          # broken "make extension available" step pass spuriously (INSTALLED
+          # and EXPECTED would both reflect the same broken state). Reading
+          # EXPECTED from make keeps it authoritative and independent of the DB,
+          # and release-agnostic (it tracks control's default_version).
+          # stderr is discarded to drop a pre-existing, unrelated "overriding
+          # recipe" make warning.
           INSTALLED=$(psql -tAc "SELECT extversion FROM pg_extension WHERE extname = 'cat_tools'")
-          EXPECTED=$(psql -tAc "SELECT default_version FROM pg_available_extensions WHERE name = 'cat_tools'")
+          EXPECTED=$(make -s print-EXTENSION_cat_tools_VERSION 2>/dev/null | sed -n 's/.*set to "\(.*\)"$/\1/p')
           echo "Installed version: ${INSTALLED:-<not found>}"
-          echo "Expected (default) version: ${EXPECTED:-<not found>}"
+          echo "Expected (build) version: ${EXPECTED:-<not found>}"
           test "$INSTALLED" = "$EXPECTED"
       - name: Run test suite on upgraded cluster
         run: make test
@@ -148,26 +154,30 @@ jobs:
         run: |
           psql -c "CREATE EXTENSION cat_tools VERSION '0.2.0'"
           psql -c "ALTER EXTENSION cat_tools UPDATE"
-          # Assert UPDATE reached the extension's current default_version, as
-          # reported by PostgreSQL, rather than a hardcoded literal. This keeps
-          # the update test release-agnostic.
+          # Assert UPDATE reached the built version, rather than a hardcoded
+          # literal. EXPECTED comes from the build (make), NOT from psql: a
+          # DB-derived expected value could match a broken install spuriously.
+          # This keeps the update test authoritative and release-agnostic.
+          # stderr is discarded to drop a pre-existing, unrelated make warning.
           INSTALLED=$(psql -tAc "SELECT extversion FROM pg_extension WHERE extname = 'cat_tools'")
-          EXPECTED=$(psql -tAc "SELECT default_version FROM pg_available_extensions WHERE name = 'cat_tools'")
+          EXPECTED=$(make -s print-EXTENSION_cat_tools_VERSION 2>/dev/null | sed -n 's/.*set to "\(.*\)"$/\1/p')
           echo "Installed version after 0.2.0 upgrade: ${INSTALLED:-<not found>}"
-          echo "Expected (default) version: ${EXPECTED:-<not found>}"
+          echo "Expected (build) version: ${EXPECTED:-<not found>}"
           test "$INSTALLED" = "$EXPECTED"
       - name: Test upgrade from 0.2.1
         run: |
           createdb cat_tools_from_021
           psql -d cat_tools_from_021 -c "CREATE EXTENSION cat_tools VERSION '0.2.1'"
           psql -d cat_tools_from_021 -c "ALTER EXTENSION cat_tools UPDATE"
-          # Assert UPDATE reached the extension's current default_version, as
-          # reported by PostgreSQL, rather than a hardcoded literal. This keeps
-          # the update test release-agnostic.
+          # Assert UPDATE reached the built version, rather than a hardcoded
+          # literal. EXPECTED comes from the build (make), NOT from psql: a
+          # DB-derived expected value could match a broken install spuriously.
+          # This keeps the update test authoritative and release-agnostic.
+          # stderr is discarded to drop a pre-existing, unrelated make warning.
           INSTALLED=$(psql -d cat_tools_from_021 -tAc "SELECT extversion FROM pg_extension WHERE extname = 'cat_tools'")
-          EXPECTED=$(psql -d cat_tools_from_021 -tAc "SELECT default_version FROM pg_available_extensions WHERE name = 'cat_tools'")
+          EXPECTED=$(make -s print-EXTENSION_cat_tools_VERSION 2>/dev/null | sed -n 's/.*set to "\(.*\)"$/\1/p')
           echo "Installed version after 0.2.1 upgrade: ${INSTALLED:-<not found>}"
-          echo "Expected (default) version: ${EXPECTED:-<not found>}"
+          echo "Expected (build) version: ${EXPECTED:-<not found>}"
           test "$INSTALLED" = "$EXPECTED"
       - name: Run test suite on updated extension
         run: make test
