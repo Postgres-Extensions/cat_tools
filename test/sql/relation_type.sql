@@ -5,17 +5,20 @@
 -- test_role is set in test/deps.sql
 
 SET LOCAL ROLE :use_role;
-CREATE TEMP VIEW kinds AS
-  SELECT
-      (cat_tools.enum_range('cat_tools.relation_type'))[gs] AS kind
-      , (cat_tools.enum_range('cat_tools.relation_relkind'))[gs] AS relkind
-    FROM generate_series(
-      1
-      , greatest(
-        array_upper(cat_tools.enum_range('cat_tools.relation_type'), 1)
-        , array_upper(cat_tools.enum_range('cat_tools.relation_relkind'), 1)
-      )
-    ) gs
+/*
+ * Canonical (relkind, kind) pairs per pg_class.h, hard-coded so the assertions
+ * below actually verify the mapping rather than re-encoding enum order.
+ */
+CREATE TEMP VIEW kinds(relkind, kind) AS
+  VALUES
+    ('r'::text, 'table'::text)
+    , ('i', 'index')
+    , ('S', 'sequence')
+    , ('t', 'toast table')
+    , ('v', 'view')
+    , ('c', 'composite type')
+    , ('f', 'foreign table')
+    , ('m', 'materialized view')
 ;
 
 SELECT plan(
