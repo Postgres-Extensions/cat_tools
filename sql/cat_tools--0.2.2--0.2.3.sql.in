@@ -1,0 +1,34 @@
+/*
+ * Correct the c/f/m relkind mapping per pg_class.h in both functions.
+ * CREATE OR REPLACE preserves existing grants.
+ */
+
+CREATE OR REPLACE FUNCTION cat_tools.relation__kind(
+  relkind cat_tools.relation_relkind
+) RETURNS cat_tools.relation_type LANGUAGE sql STRICT IMMUTABLE AS $body$
+SELECT CASE relkind
+  WHEN 'r' THEN 'table'
+  WHEN 'i' THEN 'index'
+  WHEN 'S' THEN 'sequence'
+  WHEN 't' THEN 'toast table'
+  WHEN 'v' THEN 'view'
+  WHEN 'c' THEN 'composite type'
+  WHEN 'f' THEN 'foreign table'
+  WHEN 'm' THEN 'materialized view'
+END::cat_tools.relation_type
+$body$;
+
+CREATE OR REPLACE FUNCTION cat_tools.relation__relkind(
+  kind cat_tools.relation_type
+) RETURNS cat_tools.relation_relkind LANGUAGE sql STRICT IMMUTABLE AS $body$
+SELECT CASE kind
+  WHEN 'table' THEN 'r'
+  WHEN 'index' THEN 'i'
+  WHEN 'sequence' THEN 'S'
+  WHEN 'toast table' THEN 't'
+  WHEN 'view' THEN 'v'
+  WHEN 'composite type' THEN 'c'
+  WHEN 'foreign table' THEN 'f'
+  WHEN 'materialized view' THEN 'm'
+END::cat_tools.relation_relkind
+$body$;

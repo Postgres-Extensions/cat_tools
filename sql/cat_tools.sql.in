@@ -646,15 +646,16 @@ SELECT __cat_tools.create_function(
   , 'relkind cat_tools.relation_relkind'
   , 'cat_tools.relation_type LANGUAGE sql STRICT IMMUTABLE'
   , $body$
+/* Per pg_class.h: relkind 'c' = composite type, 'f' = foreign table, 'm' = materialized view. */
 SELECT CASE relkind
   WHEN 'r' THEN 'table'
   WHEN 'i' THEN 'index'
   WHEN 'S' THEN 'sequence'
   WHEN 't' THEN 'toast table'
   WHEN 'v' THEN 'view'
-  WHEN 'c' THEN 'materialized view'
-  WHEN 'f' THEN 'composite type'
-  WHEN 'm' THEN 'foreign table'
+  WHEN 'c' THEN 'composite type'
+  WHEN 'f' THEN 'foreign table'
+  WHEN 'm' THEN 'materialized view'
 END::cat_tools.relation_type
 $body$
   , 'cat_tools__usage'
@@ -666,15 +667,16 @@ SELECT __cat_tools.create_function(
   , 'kind cat_tools.relation_type'
   , 'cat_tools.relation_relkind LANGUAGE sql STRICT IMMUTABLE'
   , $body$
+/* Mapping per pg_class.h, same as relation__kind() above. */
 SELECT CASE kind
   WHEN 'table' THEN 'r'
   WHEN 'index' THEN 'i'
   WHEN 'sequence' THEN 'S'
   WHEN 'toast table' THEN 't'
   WHEN 'view' THEN 'v'
-  WHEN 'materialized view' THEN 'c'
-  WHEN 'composite type' THEN 'f'
-  WHEN 'foreign table' THEN 'm'
+  WHEN 'composite type' THEN 'c'
+  WHEN 'foreign table' THEN 'f'
+  WHEN 'materialized view' THEN 'm'
 END::cat_tools.relation_relkind
 $body$
   , 'cat_tools__usage'

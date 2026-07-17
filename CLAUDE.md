@@ -43,10 +43,19 @@ Rules for what to track in git:
 
 0. If a `.sql.in` file exists, track the `.sql.in` and **not** the corresponding `.sql`.
 1. If no `.sql.in` exists, track the `.sql` directly (e.g. historical pre-0.2.0 files).
-2. Version-specific install scripts (e.g. `sql/cat_tools--0.2.2.sql.in`) MUST be tracked.
-3. Update scripts (e.g. `sql/cat_tools--0.2.1--0.2.2.sql.in`) MUST be tracked.
-4. The current version'''s install script (e.g. `sql/cat_tools--0.2.2.sql.in`) is generated
-   by `make` from `sql/cat_tools.sql.in`, but MUST still be tracked (rule 2 applies).
+2. Version-specific install scripts (e.g. `sql/cat_tools--0.2.2.sql.in`) are tracked BY
+   DEFAULT. They enable update testing (install an old version, `ALTER EXTENSION UPDATE`,
+   verify) and, because a new MAJOR PostgreSQL version can unpredictably break installing
+   an OLDER extension version, keeping old versions committed lets CI catch when a version
+   stops installing on a newer PG.
+   See https://github.com/Postgres-Extensions/pgxntool/issues/51.
+3. Update scripts (e.g. `sql/cat_tools--0.2.1--0.2.2.sql.in`) MUST be tracked — they are
+   essential to the update path and have no substitute.
+4. EXCEPTION to rule 2: a minor version that doesn't significantly change the extension
+   (e.g. a small bug fix) is unlikely to cross a PG supported-version boundary, so its
+   generated install script adds little test-coverage value and MAY be omitted (regenerated
+   from `sql/cat_tools.sql.in` at build time). 0.2.3 is such a case — which is why
+   `sql/cat_tools--0.2.3.sql.in` is intentionally NOT tracked.
 5. Version-specific files MUST NEVER be edited manually — always edit `sql/cat_tools.sql.in`
    and regenerate.
 
