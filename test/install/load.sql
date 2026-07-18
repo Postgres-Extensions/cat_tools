@@ -1,20 +1,20 @@
 /*
- * Single, committed-once installer for the test suite.
+ * Single, committed-once installer for the test suite's dependencies: the
+ * cat_tools extension (see the modes below) and the test roles + grants.
  *
  * pgxntool's test/install feature runs this file COMMITTED, in its own
- * pg_regress session, BEFORE the main pgTAP suite (via a generated schedule).
- * Because the state it creates is committed, it persists into every test in
- * the suite. pgTAP wraps each test/sql/ file in a transaction that is rolled
- * back, so the objects installed here are the ONLY committed copy: tests read
- * them (create temp tables, SET ROLE, etc., all rolled back) but never modify
- * or drop them. This runs ONCE instead of per-test, which is a real time saver
- * for extensions with many dependencies or large install scripts.
- *
- * This is the ONE place the suite's dependencies are installed:
- *   - the cat_tools extension (see the modes below)
- *   - the test roles and their grants
- * deps.sql (run per-test) no longer installs anything; it only sets the psql
- * variables the suite references.
+ * pg_regress session, BEFORE the main pgTAP suite. Because its state is
+ * committed it persists into every test and runs ONCE instead of per-test
+ * (pgTAP rolls back each test/sql/ file, so tests read these objects but never
+ * modify them). Committing also MATTERS for correctness in update mode: the
+ * update to the current version runs ALTER TYPE ... ADD VALUE on
+ * cat_tools.relation_relkind / relation_type, and PostgreSQL forbids USING a
+ * newly added enum value in the same transaction that added it (SQLSTATE 55P04,
+ * "unsafe use of new value"). The suite uses those values, so the update must be
+ * committed before the suite runs -- mirroring a real production update (ALTER
+ * EXTENSION UPDATE commits, then later transactions use the new values).
+ * deps.sql (run per-test) installs nothing; it only sets the psql variables the
+ * suite references.
  *
  * Three modes, selected by the cat_tools.test_load_mode placeholder GUC, which
  * the Makefile TEST_LOAD_SOURCE block sets via PGOPTIONS (fresh is the default):
@@ -22,22 +22,13 @@
  *   - update: CREATE EXTENSION at an older version (cat_tools.test_update_from,
  *     default 0.2.2) then ALTER EXTENSION UPDATE -- to cat_tools.test_update_to
  *     when that GUC is non-empty, otherwise to the current default_version.
- *     Exercises the update scripts; reusing the SAME suite and expected output
- *     asserts an updated database behaves identically to a fresh install.
- *   - existing: the extension is ALREADY installed in the target database (by a
- *     binary pg_upgrade, or an ALTER EXTENSION UPDATE performed outside the
- *     suite). load.sql must NOT drop/create/update it -- that would destroy
- *     exactly what the suite is here to validate. It only asserts the extension
- *     is present and at the current version, then creates the test roles.
- *
- * Why an update must be committed here (not done per-test in deps.sql): the
- * update to the current version runs ALTER TYPE ... ADD VALUE on
- * cat_tools.relation_relkind / relation_type, and PostgreSQL forbids USING a
- * newly added enum value in the same transaction that added it (SQLSTATE
- * 55P04, "unsafe use of new value"). The suite uses those values, so the
- * update must be committed before the suite runs -- which mirrors a real
- * production update (ALTER EXTENSION UPDATE commits, then later transactions
- * use the new values).
+ *     Reusing the SAME suite and expected output asserts an updated database
+ *     behaves identically to a fresh install.
+ *   - existing: the extension is ALREADY installed (by binary pg_upgrade, or an
+ *     ALTER EXTENSION UPDATE performed outside the suite). load.sql must NOT
+ *     drop/create/update it -- that would destroy exactly what the suite
+ *     validates. It only asserts presence + current version, then creates the
+ *     test roles.
  *
  * Version floors:
  *   - 0.2.2 is the OLDEST cat_tools version that installs cleanly on the
@@ -68,7 +59,7 @@ SET client_min_messages = WARNING;
 SELECT current_setting('cat_tools.test_load_mode') AS cat_tools_test_load_mode
 \gset
 
-DO $$
+DO $DO$
 BEGIN
   IF current_setting('cat_tools.test_load_mode') NOT IN ('fresh', 'update', 'existing') THEN
     RAISE EXCEPTION
@@ -77,7 +68,7 @@ BEGIN
     ;
   END IF;
 END
-$$;
+$DO$;
 
 SELECT
     :'cat_tools_test_load_mode' = 'update'   AS cat_tools_mode_update
@@ -91,9 +82,9 @@ SELECT
  * went through is exactly what the suite is validating, so dropping or
  * reinstalling it would defeat the test. Fail loudly on absence or mismatch.
  * (CI additionally plants a dependency guard so a stray non-CASCADE drop would
- * error rather than silently reinstall; see test/ci/existing_mode.sh.)
+ * error rather than silently reinstall; see bin/test_existing.)
  */
-DO $$
+DO $DO$
 DECLARE
   v_installed text := (SELECT extversion FROM pg_extension WHERE extname = 'cat_tools');
   v_default   text := (SELECT default_version FROM pg_available_extensions WHERE name = 'cat_tools');
@@ -108,7 +99,7 @@ BEGIN
     ;
   END IF;
 END
-$$;
+$DO$;
 \else
 /*
  * fresh / update: (re)install from scratch. Drop-first so a re-run on a
@@ -124,7 +115,7 @@ $$;
  * (e.g. CREATE on public, cat_tools__usage membership) so DROP ROLE cannot fail
  * with a dependency error; the pg_roles guard skips a not-yet-existing role
  * (DROP OWNED BY errors on one), and format(%I) quotes the name correctly for
- * the mixed-case test roles.
+ * the test roles (which contain spaces and mixed case, so they must be quoted).
  */
 DROP EXTENSION IF EXISTS cat_tools CASCADE;
 
@@ -153,7 +144,16 @@ SELECT pg_temp.drop_role('cat_tools__usage');
  */
 SELECT current_setting('cat_tools.test_update_from') AS cat_tools_test_update_from \gset
 SELECT current_setting('cat_tools.test_update_to')   AS cat_tools_test_update_to   \gset
-SELECT :'cat_tools_test_update_to' <> '' AS cat_tools_update_has_to \gset
+/*
+ * Build the optional target clause once so a SINGLE ALTER EXTENSION covers both
+ * cases: an empty test_update_to yields '' (update to the current
+ * default_version -- the widest path); a non-empty value yields "TO '<v>'".
+ * format(%L) quotes the version literal safely; the bare :clause interpolation
+ * below then drops it in verbatim.
+ */
+SELECT CASE WHEN :'cat_tools_test_update_to' = '' THEN ''
+            ELSE format('TO %L', :'cat_tools_test_update_to') END
+  AS cat_tools_update_to_clause \gset
 
 CREATE EXTENSION cat_tools VERSION :'cat_tools_test_update_from';
 /*
@@ -161,19 +161,17 @@ CREATE EXTENSION cat_tools VERSION :'cat_tools_test_update_from';
  * approach used by test/build/upgrade.sql.
  */
 SET client_min_messages = ERROR;
-\if :cat_tools_update_has_to
-ALTER EXTENSION cat_tools UPDATE TO :'cat_tools_test_update_to';
-\else
-ALTER EXTENSION cat_tools UPDATE;
-\endif
+ALTER EXTENSION cat_tools UPDATE :cat_tools_update_to_clause;
 SET client_min_messages = WARNING;
 \else
 CREATE EXTENSION cat_tools;
 \endif
+-- end \if :cat_tools_mode_update (fresh vs. update install branch)
 \endif
+-- end \if :cat_tools_mode_existing (existing mode skips the whole (re)install block)
 
 /*
- * Test roles and grants the suite depends on. Formerly created per-test in
+ * Roles and grants the test suite depends on. Formerly created per-test in
  * deps.sql; now committed here once. Created idempotently because the source
  * differs by mode: fresh/update dropped them just above, while a freshly
  * pg_upgraded database (existing mode) never had them (roles are global, and

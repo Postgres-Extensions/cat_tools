@@ -114,7 +114,7 @@ parse-time error):
     the old cluster** (the `0.2.0`→`0.2.2` script recreates the views with the pg_upgrade-safe
     omit_column fix) → plant guard → pg_upgrade → update to current. This proves a `0.2.2`
     reached via the bridge update (not a fresh install) survives pg_upgrade.
-  Both flows plant the dependency guard and run through `test/ci/existing_mode.sh`.
+  Both flows plant the dependency guard and run through `bin/test_existing`.
 
 **When working on a new version:** review and expand these matrices. A new version's install
 script may support more PG versions, enabling testing of the update path from older
@@ -133,6 +133,16 @@ Always use block comment format for multi-line comments in SQL files:
 ```
 
 Never use `--` line comments for multi-line explanations.
+
+### Closing non-indentable blocks
+When closing a code block that cannot be indented to show its nesting (e.g. SQL
+`\endif`, `DO $$...$$`, shell heredocs, column-0 `fi`/`esac`) AND that block
+contains nested blocks, label the closer with a comment naming which block it
+closes — e.g. shell `esac  # basename dispatch`, or a named dollar-quote
+`DO $DO$ ... $DO$` for a DO block. Where the language rejects a trailing comment
+on the closer (psql `\endif` warns "extra argument ignored"), put the label on
+the immediately following line instead (e.g. `\endif` then
+`-- end \if :cat_tools_mode_existing`).
 
 ### Terminology
 "upgrade" refers to a PostgreSQL cluster (`pg_upgrade`); "update" refers to an extension

@@ -7,14 +7,15 @@
  *   - :'use_role'  -> the name as a string LITERAL (has_*_privilege(), etc.)
  *   - %I / quote_ident() in dynamic SQL
  *
- * The names are deliberately mixed-case so they REQUIRE double-quoting: any site
- * that interpolates the bare identifier (:use_role) folds it to lower case and
- * fails with "role ... does not exist", surfacing a missing-quote bug instead of
- * silently passing.
+ * The names deliberately contain spaces, a colon, and mixed case so they REQUIRE
+ * double-quoting: any site that interpolates the bare identifier (:use_role)
+ * would break the token apart / fold it to lower case and fail with
+ * "role ... does not exist", surfacing a missing-quote bug instead of silently
+ * passing.
  *
  * Both test/install/load.sql (which creates and drops the roles, committed once
  * before the suite) and test/deps.sql (per test, because psql variables are
  * session-local) \i this file so the names live in exactly one place.
  */
-\set no_use_role cat_tools_testing__NO_USE
-\set use_role cat_tools_testing__USE
+\set no_use_role 'cat_tools testing: NO USE'
+\set use_role 'cat_tools testing: USE'
