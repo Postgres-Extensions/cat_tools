@@ -103,8 +103,22 @@ run_suite() {
   assert_version "$db" current
   assert_drop_blocked "$db"
   make check-relkind-source
-  make test TEST_LOAD_SOURCE=existing CONTRIB_TESTDB="$db" EXTRA_REGRESS_OPTS=--use-existing
-  make verify-results
+  # In existing mode pg_regress runs against $db via --use-existing and must NOT
+  # create/drop its own database. Two consequences drive the make args below:
+  #   1. PGXNTOOL_ENABLE_TEST_BUILD=no: base.mk auto-enables the test-build sanity
+  #      check whenever test/build/*.sql exist, adding it as a `test` prerequisite.
+  #      test-build spawns a recursive `installcheck` that INHERITS this call's
+  #      --use-existing (a command-line var propagates to sub-makes) but targets a
+  #      fresh `regression` DB it cannot create under --use-existing, so it dies
+  #      with "database regression does not exist". test-build is a fresh-install
+  #      check already run by the fresh `test` job on every PG version, so it adds
+  #      nothing here -- disable it.
+  #   2. verify-results depends on `test`, so it re-runs the suite; it must carry
+  #      the SAME existing-mode overrides or it would re-run FRESH (against a new
+  #      regression DB) instead of verifying THIS existing database.
+  local existing_args="TEST_LOAD_SOURCE=existing CONTRIB_TESTDB=$db EXTRA_REGRESS_OPTS=--use-existing PGXNTOOL_ENABLE_TEST_BUILD=no"
+  make test $existing_args
+  make verify-results $existing_args
   guard_present "$db" \
     || { echo "FAIL: dependency guard vanished during the suite run on '$db' -- extension was dropped+reinstalled (CASCADE)?" >&2; exit 1; }
 }
