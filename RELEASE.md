@@ -85,3 +85,13 @@ steps cut a new release.
 > `sql.mk`; it lands immediately after the 0.2.3 release, so 0.2.3 itself is the last
 > release cut before the scheme exists — steps 3/6 above describe the flow from the
 > next release onward.
+
+## Notes and caveats
+
+- **0.2.3 catalog-view repair / `pg_upgrade` caveat.** Databases updated from
+  0.2.0/0.2.1 hold broken catalog views that fail binary `pg_upgrade` to PostgreSQL
+  12+ until the extension is updated to 0.2.3 (the update rebuilds them, dropping and
+  recreating the public `pg_class_v`/`column`/`pg_class()` objects without `CASCADE`).
+  Surface this in the release notes when people may cross the PG 11 → 12+ boundary. See
+  README.asc "Updating the extension" and
+  https://github.com/Postgres-Extensions/cat_tools/pull/42.
