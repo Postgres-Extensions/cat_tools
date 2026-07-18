@@ -1,4 +1,176 @@
 /*
+ * NOTE: All pg_temp objects must be dropped at the end of the script!
+ * Otherwise the eventual DROP CASCADE of pg_temp when the session ends will
+ * also drop the extension! Instead of risking problems, create our own
+ * "temporary" schema instead.
+ */
+CREATE SCHEMA __cat_tools;
+
+CREATE FUNCTION __cat_tools.exec(
+  sql text
+) RETURNS void LANGUAGE plpgsql AS $body$
+BEGIN
+  RAISE DEBUG 'sql = %', sql;
+  EXECUTE sql;
+END
+$body$;
+
+CREATE FUNCTION __cat_tools.omit_column(
+  rel text
+  , omit name[] DEFAULT array['oid']
+) RETURNS text LANGUAGE sql STABLE AS $body$
+SELECT array_to_string(array(
+    SELECT attname
+      FROM pg_attribute a
+      WHERE attrelid = rel::regclass
+        AND NOT attisdropped
+        AND attnum >= 0
+        AND attname != ALL( omit )
+      ORDER BY attnum
+    )
+  , ', '
+)
+$body$;
+
+/*
+ * REPAIR: force a full rebuild of the _cat_tools.pg_class_v dependency chain.
+ *
+ * The published 0.2.2 could be reached via the 0.2.0->0.2.2 / 0.2.1->0.2.2
+ * update scripts, whose __cat_tools.omit_column used `!= ANY(omit)` -- a no-op
+ * for a multi-element omit list, so relhasoids/relhaspkey were never stripped
+ * from _cat_tools.pg_class_v. Such a database, once binary-pg_upgraded to PG12+
+ * (where pg_class has no relhasoids/relhaspkey), holds a view that references
+ * non-existent catalog columns. Rebuild the chain here so an already-broken
+ * 0.2.2 database is REPAIRED when it updates to 0.2.3. Where the view is already
+ * correct (fresh 0.2.2 install, or a PG major where those columns never
+ * existed) this is a harmless no-op rebuild.
+ *
+ * CREATE OR REPLACE VIEW cannot drop columns, so drop the chain in reverse
+ * dependency order (no CASCADE, so a DROP fails loudly on a user dependency) and
+ * recreate it forward with the corrected column list. cat_tools.pg_class() is
+ * dropped because it RETURNS the cat_tools.pg_class_v rowtype.
+ */
+DROP VIEW cat_tools.column;
+DROP VIEW _cat_tools.column;
+DROP VIEW _cat_tools.pg_attribute_v;
+DROP FUNCTION cat_tools.pg_class(pg_catalog.regclass);
+DROP VIEW cat_tools.pg_class_v;
+DROP VIEW _cat_tools.pg_class_v;
+
+SELECT __cat_tools.exec(format($fmt$
+CREATE VIEW _cat_tools.pg_class_v AS
+  SELECT c.oid AS reloid
+      , %s
+      , n.nspname AS relschema
+    FROM pg_class c
+      LEFT JOIN pg_namespace n ON( n.oid = c.relnamespace )
+;
+$fmt$
+  , __cat_tools.omit_column('pg_catalog.pg_class', array['oid', 'relhasoids', 'relhaspkey'])
+));
+REVOKE ALL ON _cat_tools.pg_class_v FROM public;
+
+CREATE VIEW cat_tools.pg_class_v AS
+  SELECT *
+    FROM _cat_tools.pg_class_v
+    WHERE NOT pg_is_other_temp_schema(relnamespace)
+      AND relkind IN( 'r', 'v', 'f' )
+;
+GRANT SELECT ON cat_tools.pg_class_v TO cat_tools__usage;
+
+CREATE FUNCTION cat_tools.pg_class(
+  rel pg_catalog.regclass
+) RETURNS cat_tools.pg_class_v LANGUAGE sql STABLE AS $body$
+SELECT * FROM cat_tools.pg_class_v WHERE reloid = $1
+$body$;
+REVOKE ALL ON FUNCTION cat_tools.pg_class(pg_catalog.regclass) FROM public;
+GRANT EXECUTE ON FUNCTION cat_tools.pg_class(pg_catalog.regclass) TO cat_tools__usage;
+
+/*
+ * On PG11+, pg_attribute gained attmissingval (pseudo-type anyarray, not usable in views).
+ * Include it cast to text[] on PG11+; expose as NULL::text[] on older versions.
+ */
+SELECT __cat_tools.exec(format($fmt$
+CREATE VIEW _cat_tools.pg_attribute_v AS
+  SELECT %s
+      , c.*
+      , t.oid AS typoid
+      , %s
+      , a.attmissingval::text::text[] AS attmissingval -- SED: REQUIRES 11!
+      , NULL::text[] AS attmissingval -- SED: PRIOR TO 11!
+    FROM pg_attribute a
+      LEFT JOIN _cat_tools.pg_class_v c ON ( c.reloid = a.attrelid )
+      LEFT JOIN pg_type t ON ( t.oid = a.atttypid )
+;
+$fmt$
+  /*
+   * attmissingval is explicitly included above (cast to text[] via SED markers).
+   * Omit it here so it doesn't appear twice, and omit oid to avoid conflicts on PG12+.
+   */
+  , __cat_tools.omit_column('pg_catalog.pg_attribute', array['oid', 'attmissingval', 'attcacheoff'])
+  , __cat_tools.omit_column('pg_catalog.pg_type')
+));
+REVOKE ALL ON _cat_tools.pg_attribute_v FROM public;
+
+/*
+ * Rebuild _cat_tools.column with computed columns first and all pg_attribute_v
+ * columns (via %s) last. This ordering lets future CREATE OR REPLACE VIEW
+ * upgrades extend the pg_attribute_v column list at the end without disturbing
+ * existing column positions. See issue 13 for restoring logical ordering.
+ */
+SELECT __cat_tools.exec(format($fmt$
+CREATE VIEW _cat_tools.column AS
+  SELECT pg_catalog.format_type(typoid, atttypmod) AS column_type
+    , CASE typtype
+        WHEN 'd' THEN pg_catalog.format_type(typbasetype, typtypmod)
+        WHEN 'e' THEN 'text'
+        ELSE pg_catalog.format_type(typoid, atttypmod)
+      END AS base_type
+    , pk.conkey AS pk_columns
+    , ARRAY[attnum] <@ pk.conkey AS is_pk_member
+    , (SELECT pg_catalog.pg_get_expr(d.adbin, d.adrelid)
+          FROM pg_catalog.pg_attrdef d
+          WHERE d.adrelid = a.attrelid
+            AND d.adnum = a.attnum
+            AND a.atthasdef
+        ) AS column_default
+    , %s
+    FROM _cat_tools.pg_attribute_v a
+      LEFT JOIN pg_constraint pk
+        ON ( reloid = pk.conrelid )
+          AND pk.contype = 'p'
+;
+$fmt$
+  , __cat_tools.omit_column('_cat_tools.pg_attribute_v')
+));
+REVOKE ALL ON _cat_tools.column FROM public;
+
+CREATE VIEW cat_tools.column AS
+  SELECT *
+    FROM _cat_tools.column
+    WHERE NOT pg_is_other_temp_schema(relnamespace)
+      AND attnum > 0
+      AND NOT attisdropped
+      AND relkind IN( 'r', 'v', 'f' )
+      AND (
+        pg_has_role(SESSION_USER, relowner, 'USAGE'::text)
+        OR has_column_privilege(SESSION_USER, reloid, attnum, 'SELECT, INSERT, UPDATE, REFERENCES'::text)
+      )
+    ORDER BY relschema, relname, attnum
+;
+GRANT SELECT ON cat_tools.column TO cat_tools__usage;
+
+-- Drop temporary helper objects
+DROP FUNCTION __cat_tools.omit_column(
+  rel text
+  , omit name[]
+);
+DROP FUNCTION __cat_tools.exec(
+  sql text
+);
+DROP SCHEMA __cat_tools;
+
+/*
  * Correct the c/f/m relkind mapping per pg_class.h in both functions.
  * CREATE OR REPLACE preserves existing grants.
  */
