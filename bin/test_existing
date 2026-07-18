@@ -11,10 +11,29 @@
 # so it lives here once instead of being duplicated as inline YAML. It is NOT
 # CI-only: a developer can run any subcommand locally against a scratch database.
 #
-# SUBCOMMANDS via the invocation name. The script is symlinked to bin/<subcommand>
-# (bin/prepare-old, bin/run-suite, ...) and dispatches on $(basename "$0"), so
-# `bin/run-suite DB` needs no subcommand argument. Run `bin/test_existing` (the
-# canonical name, no matching subcommand) to print usage.
+# USAGE: bin/test_existing <subcommand> [args]
+#
+#   plant-guard DB
+#       Plant + prove the dependency guard (extension must already be >= 0.2.2).
+#
+#   update DB [TO_VERSION]
+#       ALTER EXTENSION cat_tools UPDATE [TO 'TO_VERSION'] (empty => current).
+#
+#   prepare-old DB INSTALL_VERSION [BRIDGE_TO]
+#       Old-cluster prep for pg-upgrade-test: create DB + extension at
+#       INSTALL_VERSION, optionally bridge-update to BRIDGE_TO, then plant guard.
+#
+#   run-suite DB
+#       Run the suite in existing mode (extension must be at the current version).
+#
+#   update-scenario DB FROM_VERSION
+#       Create DB + extension at FROM_VERSION, plant guard, update to current,
+#       run the suite against that real updated database.
+#
+#   update-check DB FROM_VERSION TO_VERSION
+#       Lightweight check that a specific update script applies (no suite).
+#
+# Run `bin/test_existing` with no subcommand to print usage.
 #
 # Why the dependency guard: "existing" mode must run the suite against the ACTUAL
 # upgraded/updated objects. If anything silently dropped + reinstalled the
@@ -28,9 +47,9 @@
 set -euo pipefail
 
 # Run from the repository root (where `make` works and test paths resolve),
-# regardless of the caller's cwd. readlink -f resolves the bin/<subcommand>
-# symlinks back to this file; bin/ sits directly under the repo root, so its
-# parent is the root (no dependency on being inside a git checkout).
+# regardless of the caller's cwd. bin/ sits directly under the repo root, so its
+# parent is the root (no dependency on being inside a git checkout). readlink -f
+# resolves any path the script was invoked through.
 cd "$(dirname "$(readlink -f "$0")")/.."
 
 # A view whose output column has a cat_tools enum type creates a pg_depend edge
@@ -41,85 +60,42 @@ cd "$(dirname "$(readlink -f "$0")")/.."
 GUARD_SCHEMA=cat_tools_drop_guard
 GUARD_VIEW=guard
 
-# Dispatch on the invocation name. Defined first for readability; INVOKED at the
-# very bottom, after every helper it calls is defined (bash resolves calls at
-# runtime, so main() appearing first is fine).
-main() {
-  case "$(basename "$0")" in
-    plant-guard)
-      # plant-guard DB   (extension must already be installed, >= 0.2.2)
-      plant_guard "$1"
-      ;;
-    update)
-      # update DB [TO_VERSION]   (empty TO_VERSION => update to current)
-      update_ext "$1" "${2:-}"
-      ;;
-    prepare-old)
-      # prepare-old DB INSTALL_VERSION [BRIDGE_TO]
-      #   Old-cluster preparation for pg-upgrade-test. Create the database and the
-      #   extension at INSTALL_VERSION; if BRIDGE_TO is given, ALTER EXTENSION
-      #   UPDATE TO it first. That "bridge" models the real migration path a user
-      #   on an OLD PostgreSQL + OLD cat_tools must take: e.g. on PG10, install
-      #   0.2.0 then update to 0.2.2 BEFORE pg_upgrade, because the 0.2.0->0.2.2
-      #   script recreates the views with the pg_upgrade-safe omit_column fix
-      #   (https://github.com/Postgres-Extensions/cat_tools/pull/18) -- the raw
-      #   0.2.0 views reference catalog columns removed in newer PostgreSQL and
-      #   would break binary pg_upgrade. Then plant + prove the dependency guard
-      #   (at the bridged version, so cat_tools.relation_type exists).
-      local db=$1 install=$2 bridge=${3:-}
-      createdb "$db"
-      psql -d "$db" -v ON_ERROR_STOP=1 -c "CREATE EXTENSION cat_tools VERSION '$install'"
-      # Use `if`, not `&&`: under `set -e` a false `[ -n ... ] && ...` would abort.
-      if [ -n "$bridge" ]; then update_ext "$db" "$bridge"; fi
-      plant_guard "$db"
-      ;;
-    run-suite)
-      # run-suite DB   (extension must already be at the current version)
-      run_suite "$1"
-      ;;
-    update-scenario)
-      # update-scenario DB FROM_VERSION
-      #   Full extension-update flow that runs the existing-mode suite: create the
-      #   DB and extension at FROM_VERSION, plant + prove the guard, update to the
-      #   current version, then run the suite against that real updated database.
-      local db=$1 from=$2
-      createdb "$db"
-      psql -d "$db" -v ON_ERROR_STOP=1 -c "CREATE EXTENSION cat_tools VERSION '$from'"
-      plant_guard "$db"
-      update_ext "$db"
-      run_suite "$db"
-      ;;
-    update-check)
-      # update-check DB FROM_VERSION TO_VERSION
-      #   Lightweight check that a specific update script applies (no suite): used
-      #   for the pre-0.2.2 scripts, which only install on PG10 and target 0.2.2
-      #   (not the current version, so the suite cannot run against them).
-      local db=$1 from=$2 to=$3
-      createdb "$db"
-      psql -d "$db" -v ON_ERROR_STOP=1 -c "CREATE EXTENSION cat_tools VERSION '$from'"
-      update_ext "$db" "$to"
-      assert_version "$db" "$to"
-      ;;
-    *)
-      echo "usage: invoke via one of the bin/<subcommand> symlinks:" >&2
-      echo "  plant-guard | update | prepare-old | run-suite |" >&2
-      echo "  update-scenario | update-check" >&2
-      exit 2
-      ;;
-  esac  # basename "$0" dispatch
+# ---------------------------------------------------------------------------
+# psql helpers
+# ---------------------------------------------------------------------------
+
+# Capture the single-value (-tAc) output of a query against a database. Used for
+# the many "read one value back out" calls below so the psql flags live in one
+# place.
+psql_value() {
+  local db=$1 sql=$2
+  psql -d "$db" -tAc "$sql"
 }
+
+# Run SQL that must succeed, aborting the whole script on any error
+# (ON_ERROR_STOP). Extra args pass through to psql, so callers use either
+# `psql_do DB -c '...'` or a heredoc (`psql_do DB <<SQL ... SQL`).
+psql_do() {
+  local db=$1
+  shift
+  psql -d "$db" -v ON_ERROR_STOP=1 "$@"
+}
+
+# ---------------------------------------------------------------------------
+# Version / guard helpers
+# ---------------------------------------------------------------------------
 
 current_version() {
   make -s print-PGXNVERSION 2>/dev/null | sed -n 's/.*set to "\(.*\)"$/\1/p'
 }
 
 installed_version() {
-  psql -d "$1" -tAc \
+  psql_value "$1" \
     "SELECT extversion FROM pg_extension WHERE extname = 'cat_tools'"
 }
 
 guard_present() {
-  test "$(psql -d "$1" -tAc \
+  test "$(psql_value "$1" \
     "SELECT count(*) FROM pg_views WHERE schemaname = '$GUARD_SCHEMA' AND viewname = '$GUARD_VIEW'")" = 1
 }
 
@@ -127,7 +103,7 @@ guard_present() {
 # CREATE EXTENSION (and before any update/upgrade) so it persists through them.
 plant_guard() {
   local db=$1
-  psql -d "$db" -v ON_ERROR_STOP=1 <<SQL
+  psql_do "$db" <<SQL
 CREATE SCHEMA IF NOT EXISTS $GUARD_SCHEMA;
 CREATE OR REPLACE VIEW $GUARD_SCHEMA.$GUARD_VIEW AS
   SELECT NULL::cat_tools.relation_type AS guarded_member;
@@ -140,7 +116,7 @@ SQL
 # silently test a fresh install -- fail loudly so CI never passes unprotected.
 assert_drop_blocked() {
   local db=$1
-  if psql -d "$db" -v ON_ERROR_STOP=1 -c "DROP EXTENSION cat_tools" >/dev/null 2>&1; then
+  if psql_do "$db" -c "DROP EXTENSION cat_tools" >/dev/null 2>&1; then
     echo "FAIL: DROP EXTENSION cat_tools (non-CASCADE) unexpectedly SUCCEEDED in '$db' -- dependency guard is ineffective" >&2
     exit 1
   fi
@@ -168,7 +144,56 @@ update_ext() {
   # covers both cases (empty $to => bare "ALTER EXTENSION ... UPDATE" to current).
   # Use `if`, not `&&`: a false test under `set -e` would abort the script.
   if [ -n "$to" ]; then to="TO '$to'"; fi
-  psql -d "$db" -v ON_ERROR_STOP=1 -c "ALTER EXTENSION cat_tools UPDATE $to"
+  psql_do "$db" -c "ALTER EXTENSION cat_tools UPDATE $to"
+}
+
+# ---------------------------------------------------------------------------
+# Subcommand implementations
+# ---------------------------------------------------------------------------
+
+# prepare-old DB INSTALL_VERSION [BRIDGE_TO]
+#   Old-cluster preparation for pg-upgrade-test. Create the database and the
+#   extension at INSTALL_VERSION; if BRIDGE_TO is given, ALTER EXTENSION UPDATE
+#   TO it first. That "bridge" models the real migration path a user on an OLD
+#   PostgreSQL + OLD cat_tools must take: e.g. on PG10, install 0.2.0 then update
+#   to 0.2.2 BEFORE pg_upgrade, because the 0.2.0->0.2.2 script recreates the
+#   views with the pg_upgrade-safe omit_column fix
+#   (https://github.com/Postgres-Extensions/cat_tools/pull/18) -- the raw 0.2.0
+#   views reference catalog columns removed in newer PostgreSQL and would break
+#   binary pg_upgrade. Then plant + prove the dependency guard (at the bridged
+#   version, so cat_tools.relation_type exists).
+prepare_old() {
+  local db=$1 install=$2 bridge=${3:-}
+  createdb "$db"
+  psql_do "$db" -c "CREATE EXTENSION cat_tools VERSION '$install'"
+  # Use `if`, not `&&`: under `set -e` a false `[ -n ... ] && ...` would abort.
+  if [ -n "$bridge" ]; then update_ext "$db" "$bridge"; fi
+  plant_guard "$db"
+}
+
+# update-scenario DB FROM_VERSION
+#   Full extension-update flow that runs the existing-mode suite: create the DB
+#   and extension at FROM_VERSION, plant + prove the guard, update to the current
+#   version, then run the suite against that real updated database.
+update_scenario() {
+  local db=$1 from=$2
+  createdb "$db"
+  psql_do "$db" -c "CREATE EXTENSION cat_tools VERSION '$from'"
+  plant_guard "$db"
+  update_ext "$db"
+  run_suite "$db"
+}
+
+# update-check DB FROM_VERSION TO_VERSION
+#   Lightweight check that a specific update script applies (no suite): used for
+#   the pre-0.2.2 scripts, which only install on PG10 and target 0.2.2 (not the
+#   current version, so the suite cannot run against them).
+update_check() {
+  local db=$1 from=$2 to=$3
+  createdb "$db"
+  psql_do "$db" -c "CREATE EXTENSION cat_tools VERSION '$from'"
+  update_ext "$db" "$to"
+  assert_version "$db" "$to"
 }
 
 # Run the pgTAP suite against an already-populated database in existing mode.
@@ -201,6 +226,34 @@ run_suite() {
   # have removed the guard view, meaning the suite tested a fresh install, not $db.
   guard_present "$db" \
     || { echo "FAIL: dependency guard vanished during the suite run on '$db' -- extension was dropped+reinstalled (CASCADE)?" >&2; exit 1; }
+}
+
+usage() {
+  echo "usage: bin/test_existing <subcommand> [args]" >&2
+  echo "  plant-guard DB" >&2
+  echo "  update DB [TO_VERSION]" >&2
+  echo "  prepare-old DB INSTALL_VERSION [BRIDGE_TO]" >&2
+  echo "  run-suite DB" >&2
+  echo "  update-scenario DB FROM_VERSION" >&2
+  echo "  update-check DB FROM_VERSION TO_VERSION" >&2
+  exit 2
+}
+
+# Explicit subcommand dispatch on $1. Defined first for readability; INVOKED at
+# the very bottom, after every helper it calls is defined (bash resolves calls at
+# runtime, so main() appearing first is fine).
+main() {
+  local cmd=${1:-}
+  shift || true
+  case "$cmd" in
+    plant-guard)     plant_guard "$@" ;;
+    update)          update_ext "$@" ;;
+    prepare-old)     prepare_old "$@" ;;
+    run-suite)       run_suite "$@" ;;
+    update-scenario) update_scenario "$@" ;;
+    update-check)    update_check "$@" ;;
+    *)               usage ;;
+  esac
 }
 
 main "$@"

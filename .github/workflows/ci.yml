@@ -108,7 +108,7 @@ jobs:
         # install instead. The extension is always older than current, so the
         # post-upgrade ALTER EXTENSION UPDATE has real work to do.
         run: >-
-          bin/prepare-old cat_tools_upgrade
+          bin/test_existing prepare-old cat_tools_upgrade
           "${{ matrix.old_install }}" "${{ matrix.bridge_to }}"
       - name: Install PostgreSQL ${{ matrix.new_pg }}
         run: apt-get install -y postgresql-${{ matrix.new_pg }} postgresql-server-dev-${{ matrix.new_pg }}
@@ -141,14 +141,14 @@ jobs:
         # 0.2.2 extension binary pg_upgrade just migrated), running the
         # version-to-version scripts up to the current version. The 0.2.2 -> 0.3.0
         # script uses ALTER TYPE ... ADD VALUE, which is why new_pg must be >= 12.
-        run: bin/update cat_tools_upgrade
+        run: bin/test_existing update cat_tools_upgrade
       - name: Run the suite against the pg_upgraded database (existing mode)
         # run-suite asserts the version, re-proves the dependency guard still
         # blocks a non-CASCADE drop (i.e. it survived pg_upgrade), then runs the
         # suite against the REAL pg_upgraded + updated database via --use-existing
         # (so pg_regress does not drop/recreate it) -- a plain fresh `make test`
         # would silently test a fresh install instead of the migrated objects.
-        run: bin/run-suite cat_tools_upgrade
+        run: bin/test_existing run-suite cat_tools_upgrade
 
   # Proves the in-place extension update path: CREATE EXTENSION at an OLD cat_tools
   # version then ALTER EXTENSION UPDATE (no pg_upgrade, same PostgreSQL). On PG12+
@@ -201,8 +201,8 @@ jobs:
         # asserts each lands on 0.2.2. No suite runs (0.3.0 needs PG12+).
         if: matrix.pg == '10'
         run: |
-          bin/update-check cat_tools_from_020 0.2.0 0.2.2
-          bin/update-check cat_tools_from_021 0.2.1 0.2.2
+          bin/test_existing update-check cat_tools_from_020 0.2.0 0.2.2
+          bin/test_existing update-check cat_tools_from_021 0.2.1 0.2.2
       - name: Update 0.2.2 → current and run the suite (existing mode, PG12+)
         # update-scenario creates a real database at 0.2.2, plants + proves the
         # dependency guard, ALTER EXTENSION UPDATEs to the current version, and
@@ -211,7 +211,7 @@ jobs:
         # suite and expected output asserts the updated database behaves
         # identically to a fresh install.
         if: matrix.pg != '10'
-        run: bin/update-scenario cat_tools_update 0.2.2
+        run: bin/test_existing update-scenario cat_tools_update 0.2.2
 
   # A single stable check name for use as a required status check in branch
   # protection rules. Matrix jobs produce check names like "🐘 PostgreSQL 14"
