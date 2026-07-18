@@ -60,12 +60,21 @@ array_not_empty() {
 # Debug function
 # Usage: debug LEVEL "message"
 # Outputs message to stderr if DEBUG >= LEVEL
-# Debug levels use multiples of 10 (10, 20, 30, 40, etc.) to allow for easy expansion
+#
+# LEVEL encodes how noisy/esoteric a message is -- roughly, how far you'd crank
+# DEBUG before you'd actually want to see it. Higher = noisier, more rarely
+# useful. This is signal-to-noise, NOT code nesting depth: a top-level line can
+# warrant a high level if it's esoteric, and loop-body detail is usually high
+# precisely because it's noisy.
+#
+# The tiers below are anchors, not strict multiples -- pick any value in range
+# to fine-tune between existing calls without renumbering:
 #   - 10: Critical errors, important warnings
 #   - 20: Warnings, significant state changes
 #   - 30: General debugging, function entry/exit, array operations
 #   - 40: Verbose details, loop iterations
-#   - 50+: Maximum verbosity
+#   - 50+: Maximum verbosity (per-iteration innards)
+#
 # Enable with: DEBUG=30 scriptname.sh
 debug() {
     local level=$1
@@ -75,4 +84,27 @@ debug() {
     if [ "${DEBUG:-0}" -ge "$level" ]; then
         echo "DEBUG[$level]: $message" >&2
     fi
+}
+
+# Remove pgxntool's own dev-only directories from a consuming project.
+#
+# `git subtree` copies the ENTIRE pgxntool tree into the consumer, including
+# dev-only dirs like .github/ (pgxntool's CI) and .claude/. Those are
+# export-ignored from `make dist` and don't belong in a project that merely
+# embeds pgxntool. (GitHub only runs workflows at the repo root, so a consumer's
+# pgxntool/.github never executes anyway — but it's still clutter.) git subtree
+# doesn't honor export-ignore, so we prune them here after a sync.
+#
+# Must be run from the project root (the dir containing pgxntool/). Safe to call
+# repeatedly; a no-op once the dirs are gone.
+prune_pgxntool_dev_dirs() {
+    local d
+    for d in .github .claude; do
+        [ -e "pgxntool/$d" ] || continue
+        echo "  pgxntool/$d: pruning (pgxntool dev-only, not for embedding projects)"
+        # Stage the removal if tracked; rm -rf guarantees it's gone even if not.
+        # || : keeps this best-effort under `set -e` (rm -rf is the real cleanup).
+        git rm -rq --ignore-unmatch "pgxntool/$d" >/dev/null 2>&1 || :
+        rm -rf "pgxntool/$d"
+    done
 }

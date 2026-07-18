@@ -65,14 +65,16 @@ export PGOPTIONS := $(PGOPTIONS) -c cat_tools.test_load_mode=$(TEST_LOAD_SOURCE)
 test-update:
 	$(MAKE) test TEST_LOAD_SOURCE=update
 
-include pgxntool/base.mk
-
 # Versioned SQL is generated from .sql.in at build time. That generation, the
 # DATA list that installs it, and the relkind drift source all live in sql.mk,
-# which documents the GNU Make two-phase (parse vs. recipe) hazards involved
-# (e.g. https://github.com/Postgres-Extensions/cat_tools/issues/28). Include it
-# AFTER base.mk so it can use base.mk/control.mk/PGXS
-# vars (EXTENSION_VERSION_FILES, PG_CONFIG, MAJORVER, datadir, ...).
+# which also owns `include pgxntool/base.mk` (base.mk has no include guard, so it
+# must be included exactly once; sql.mk includes it at its top). This Makefile
+# therefore does NOT include base.mk itself -- only sql.mk. sql.mk documents the
+# GNU Make two-phase (parse vs. recipe) hazards involved (e.g.
+# https://github.com/Postgres-Extensions/cat_tools/issues/28) and relies on
+# base.mk/control.mk/PGXS vars (EXTENSION_VERSION_FILES, PG_CONFIG, MAJORVER,
+# datadir, ...). The PGXNTOOL_ENABLE_TEST_INSTALL / TEST_LOAD_SOURCE vars above
+# are set before this include so base.mk (pulled in by sql.mk) sees them.
 include sql.mk
 
 # Clean the cruft pg_regress writes into test/install/ (the self-comparing

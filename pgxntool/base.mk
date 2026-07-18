@@ -52,7 +52,6 @@ TESTDIR		?= test
 TESTOUT		?= $(TESTDIR)
 TEST_SQL_FILES		+= $(wildcard $(TESTDIR)/sql/*.sql)
 TEST_RESULT_FILES	 = $(patsubst $(TESTDIR)/sql/%.sql,$(TESTDIR)/expected/%.out,$(TEST_SQL_FILES))
-
 TEST_FILES	 = $(TEST_SQL_FILES)
 REGRESS		 = $(sort $(notdir $(TEST_FILES:.sql=)))
 REGRESS_OPTS = --inputdir=$(TESTDIR) --outputdir=$(TESTOUT) # See additional setup below
@@ -94,7 +93,9 @@ pgxntool_validate_yesno = $(strip \
 TEST_BUILD_SQL_FILES = $(wildcard $(TESTDIR)/build/*.sql)
 TEST_BUILD_FILES = $(TEST_BUILD_SQL_FILES)
 ifdef PGXNTOOL_ENABLE_TEST_BUILD
-  PGXNTOOL_ENABLE_TEST_BUILD := $(call pgxntool_validate_yesno,$(PGXNTOOL_ENABLE_TEST_BUILD),PGXNTOOL_ENABLE_TEST_BUILD)
+  # override needed so command-line values (make VAR=YES) are normalized, not silently ignored.
+  # := needed for immediate evaluation of the function call (avoids infinite recursion with =).
+  override PGXNTOOL_ENABLE_TEST_BUILD := $(call pgxntool_validate_yesno,$(PGXNTOOL_ENABLE_TEST_BUILD),PGXNTOOL_ENABLE_TEST_BUILD)
 else
   # Auto-detect: enable if test/build/ directory has SQL files
   ifneq ($(strip $(TEST_BUILD_FILES)),)
@@ -136,7 +137,9 @@ endif
 # Either approach would eliminate the ~10-line block repeated for each feature.
 TEST_INSTALL_SQL_FILES = $(wildcard $(TESTDIR)/install/*.sql)
 ifdef PGXNTOOL_ENABLE_TEST_INSTALL
-  PGXNTOOL_ENABLE_TEST_INSTALL := $(call pgxntool_validate_yesno,$(PGXNTOOL_ENABLE_TEST_INSTALL),PGXNTOOL_ENABLE_TEST_INSTALL)
+  # override needed so command-line values (make VAR=YES) are normalized, not silently ignored.
+  # := needed for immediate evaluation of the function call (avoids infinite recursion with =).
+  override PGXNTOOL_ENABLE_TEST_INSTALL := $(call pgxntool_validate_yesno,$(PGXNTOOL_ENABLE_TEST_INSTALL),PGXNTOOL_ENABLE_TEST_INSTALL)
 else
   # Auto-detect: enable if test/install/ directory has SQL files
   ifneq ($(strip $(TEST_INSTALL_SQL_FILES)),)
@@ -205,7 +208,6 @@ GE91		 = $(call test, $(MAJORVER), -ge, 91)
 ifeq ($(GE91),yes)
 all: $(EXTENSION_VERSION_FILES)
 endif
-
 
 ifeq ($(call test, $(MAJORVER), -lt, 130), yes)
 REGRESS_OPTS += --load-language=plpgsql
@@ -294,9 +296,14 @@ endif
 
 # make results: runs `make test` and copies all result files to expected.
 # DO NOT RUN THIS UNLESS YOU'RE CERTAIN ALL YOUR TESTS ARE PASSING!
+#
+# Dependency chain (verify-results: test) guarantees test completes before verify-results
+# checks regression.diffs, even under make -j. Listing both as independent prerequisites
+# of results would allow them to run concurrently, letting verify-results see stale state.
 .PHONY: results
 ifeq ($(PGXNTOOL_ENABLE_VERIFY_RESULTS),yes)
-results: verify-results test
+verify-results: test
+results: verify-results
 else
 results: test
 endif
@@ -484,27 +491,29 @@ print-%	: ; $(info $* is $(flavor $*) variable set to "$($*)") @true
 #
 # subtree sync support
 #
-# This is setup to allow any number of pull targets by defining special
-# variables. pgxntool-sync-release is an example of this.
+# All the real work (git subtree pull + update-setup-files.sh) lives in
+# pgxntool/pgxntool-sync.sh so it can be run directly, without make. These
+# targets are thin wrappers around that script.
 #
-# After the subtree pull, we run update-setup-files.sh to handle files that
-# were initially copied by setup.sh (like .gitignore). This script does a
-# 3-way merge if both you and pgxntool changed the file.
-.PHONY: pgxntool-sync-%
+# `make pgxntool-sync` pulls the latest released version from the canonical
+# repository (the script's built-in default).
+#
+# `make pgxntool-sync-<name>` pulls from the "<repo> <ref>" defined by the
+# pgxntool-sync-<name> variable, allowing any number of custom pull sources.
+.PHONY: pgxntool-sync pgxntool-sync-%
+pgxntool-sync:
+	@pgxntool/pgxntool-sync.sh
 pgxntool-sync-%:
-	@old_commit=$$(git log -1 --format=%H -- pgxntool/) && \
-	git subtree pull -P pgxntool --squash -m "Pull pgxntool from $($@)" $($@) && \
-	pgxntool/update-setup-files.sh "$$old_commit"
-pgxntool-sync: pgxntool-sync-release
+	@pgxntool/pgxntool-sync.sh $($@)
 
 # DANGER! Use these with caution. They may add extra crap to your history and
 # could make resolving merges difficult!
-pgxntool-sync-release	:= git@github.com:decibel/pgxntool.git release
-pgxntool-sync-stable	:= git@github.com:decibel/pgxntool.git stable
-pgxntool-sync-master	:= git@github.com:decibel/pgxntool.git master
-pgxntool-sync-local		:= ../pgxntool release # Not the same as PGXNTOOL_DIR!
-pgxntool-sync-local-stable	:= ../pgxntool stable # Not the same as PGXNTOOL_DIR!
-pgxntool-sync-local-master	:= ../pgxntool master # Not the same as PGXNTOOL_DIR!
+# `pgxntool-sync` (no suffix) already pulls the canonical release; these are the
+# alternatives. `-master` pulls the bleeding edge; `-local*` pull from a sibling
+# ../pgxntool checkout (not the same as PGXNTOOL_DIR!).
+pgxntool-sync-master		:= https://github.com/Postgres-Extensions/pgxntool.git master
+pgxntool-sync-local		:= ../pgxntool release
+pgxntool-sync-local-master	:= ../pgxntool master
 
 # PGXS doesn't provide any special support for distclean (it just depends on
 # clean), so we roll our own. Files that should only be removed by distclean

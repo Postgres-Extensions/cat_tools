@@ -7,7 +7,9 @@ trap 'echo "Error on line ${LINENO}"' ERR
 PGXNTOOL_DIR="$(dirname "${BASH_SOURCE[0]}")"
 source "$PGXNTOOL_DIR/lib.sh"
 
-[ -d .git ] || git init
+# Use rev-parse, not [ -d .git ]: in a worktree .git is a file, not a directory,
+# so the old check would wrongly re-run `git init` inside a valid working tree.
+git rev-parse --git-dir >/dev/null 2>&1 || git init
 
 if ! git diff --cached --exit-code; then
     echo "Git repository is not clean; please commit and try again." >&2
