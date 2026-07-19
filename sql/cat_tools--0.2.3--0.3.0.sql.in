@@ -88,10 +88,11 @@ END
 $body$;
 
 
--- NOTE: Changes already applied in 0.2.2:
+-- NOTE: Changes already applied on the path up to 0.2.3:
 -- ALTER DEFAULT PRIVILEGES, pg_class_v fix, pg_attribute_v fix, pg_extension_v fix,
 -- pg_extension__get recreation, cat_tools.column recreation are all skipped here.
--- They are part of the 0.2.1→0.2.2 upgrade.
+-- They land in 0.2.2 (fresh install) / the 0.2.2→0.2.3 rebuild, so a database
+-- reaching 0.2.3 by any route already has them.
 
 -- https://github.com/jnasbyupgrade/cat_tools/blob/new_functions/sql/cat_tools.sql.in#L165
 SELECT __cat_tools.create_function(

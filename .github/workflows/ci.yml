@@ -52,16 +52,22 @@ jobs:
       matrix:
         include:
           # old_pg=10: the FULL real-world journey for a user on old PostgreSQL +
-          # old cat_tools. 0.2.0 installs on PG10; the BRIDGE update to 0.2.2
-          # (run on PG10, before pg_upgrade) recreates the views with the
-          # pg_upgrade-safe omit_column fix so the binary pg_upgrade to a newer
-          # cluster succeeds; then update to current + run the suite. This proves
-          # a 0.2.2 reached via the bridge update (not a fresh install) survives
-          # pg_upgrade and updates to latest.
+          # old cat_tools. 0.2.0 installs on PG10; the BRIDGE update to 0.2.3
+          # (run on PG10, before pg_upgrade) is what makes pg_upgrade safe. The
+          # shipped 0.2.0→0.2.2 / 0.2.1→0.2.2 scripts do NOT fix the views (their
+          # omit_column used the no-op `!= ANY`, so relhasoids/relhaspkey survive
+          # in _cat_tools.pg_class_v); the pg_class_v DROP+CREATE rebuild that
+          # strips those columns lives in the 0.2.2→0.2.3 update. So we must
+          # bridge THROUGH 0.2.3 before pg_upgrade. 0.2.3 is also the furthest a
+          # PG10 cluster can reach: 0.2.3→0.3.0 uses ALTER TYPE ... ADD VALUE,
+          # which cannot run in an extension update script before PG12. After
+          # pg_upgrade to the new cluster, the post-upgrade step updates 0.2.3→
+          # current (0.3.0). This proves a 0.2.2/0.2.3 reached via the bridge
+          # update (not a fresh install) survives pg_upgrade and updates to latest.
           - old_pg: "10"
             new_pg: "18"
             old_install: "0.2.0"
-            bridge_to: "0.2.2"
+            bridge_to: "0.2.3"
           # old_pg>=11: 0.2.0/0.2.1 do not install on PG11+, and such users are
           # already on 0.2.2+. Install 0.2.2 directly (no bridge), pg_upgrade,
           # then update to current.
@@ -138,8 +144,8 @@ jobs:
           pg_ctlcluster ${{ matrix.new_pg }} test start
       - name: Update the pg_upgraded extension to the current version
         # Exercises ALTER EXTENSION UPDATE on genuinely pg_upgraded objects (the
-        # 0.2.2 extension binary pg_upgrade just migrated), running the
-        # version-to-version scripts up to the current version. The 0.2.2 -> 0.3.0
+        # extension binary pg_upgrade just migrated), running the
+        # version-to-version scripts up to the current version. The 0.2.3 -> 0.3.0
         # script uses ALTER TYPE ... ADD VALUE, which is why new_pg must be >= 12.
         run: bin/test_existing update cat_tools_upgrade
       - name: Run the suite against the pg_upgraded database (existing mode)

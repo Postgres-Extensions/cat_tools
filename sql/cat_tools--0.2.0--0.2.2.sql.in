@@ -25,7 +25,7 @@ SELECT array_to_string(array(
       WHERE attrelid = rel::regclass
         AND NOT attisdropped
         AND attnum >= 0
-        AND attname != ALL( omit )
+        AND attname != ANY( omit )
       ORDER BY attnum
     )
   , ', '
@@ -485,33 +485,12 @@ $body$
  */
 
 /*
- * Force a full rebuild of the _cat_tools.pg_class_v dependency chain.
- *
- * With the omit_column ANY->ALL fix (above), the omit list
- * ['oid','relhasoids','relhaspkey'] finally removes relhasoids/relhaspkey. The
- * 0.2.0 view was built with c.* and (under the old ANY no-op) kept those
- * columns; a database later binary-pg_upgraded to PG12+ (where pg_class has no
- * relhasoids/relhaspkey) would then reference non-existent catalog columns and
- * pg_upgrade would fail. CREATE OR REPLACE VIEW cannot drop columns, so the
- * whole chain hanging off _cat_tools.pg_class_v must be dropped in reverse
- * dependency order and recreated forward with the corrected column list.
- *
- * No CASCADE: a DROP fails loudly if a user object depends on one of these,
- * so the user drops it first and re-runs ALTER EXTENSION cat_tools UPDATE. This
- * also rebuilds _cat_tools.column, which 0.2.0 accidentally built with an
- * unqualified SELECT * over a pg_constraint join (dragging in conname/contype);
- * the rebuild drops those stray columns too. cat_tools.pg_class() is dropped
- * because it RETURNS the cat_tools.pg_class_v rowtype.
+ * Recreate _cat_tools.pg_class_v with dynamic column list to handle PG12+ oid visibility.
+ * On PG < 12, oid was already hidden so the effective column list is unchanged;
+ * CREATE OR REPLACE VIEW works without disturbing dependent views.
  */
-DROP VIEW cat_tools.column;
-DROP VIEW _cat_tools.column;
-DROP VIEW _cat_tools.pg_attribute_v;
-DROP FUNCTION cat_tools.pg_class(pg_catalog.regclass);
-DROP VIEW cat_tools.pg_class_v;
-DROP VIEW _cat_tools.pg_class_v;
-
 SELECT __cat_tools.exec(format($fmt$
-CREATE VIEW _cat_tools.pg_class_v AS
+CREATE OR REPLACE VIEW _cat_tools.pg_class_v AS
   SELECT c.oid AS reloid
       , %s
       , n.nspname AS relschema
@@ -523,7 +502,7 @@ $fmt$
 ));
 REVOKE ALL ON _cat_tools.pg_class_v FROM public;
 
-CREATE VIEW cat_tools.pg_class_v AS
+CREATE OR REPLACE VIEW cat_tools.pg_class_v AS
   SELECT *
     FROM _cat_tools.pg_class_v
     WHERE NOT pg_is_other_temp_schema(relnamespace)
@@ -531,20 +510,12 @@ CREATE VIEW cat_tools.pg_class_v AS
 ;
 GRANT SELECT ON cat_tools.pg_class_v TO cat_tools__usage;
 
-CREATE FUNCTION cat_tools.pg_class(
-  rel pg_catalog.regclass
-) RETURNS cat_tools.pg_class_v LANGUAGE sql STABLE AS $body$
-SELECT * FROM cat_tools.pg_class_v WHERE reloid = $1
-$body$;
-REVOKE ALL ON FUNCTION cat_tools.pg_class(pg_catalog.regclass) FROM public;
-GRANT EXECUTE ON FUNCTION cat_tools.pg_class(pg_catalog.regclass) TO cat_tools__usage;
-
 /*
  * On PG11+, pg_attribute gained attmissingval (pseudo-type anyarray, not usable in views).
  * Include it cast to text[] on PG11+; expose as NULL::text[] on older versions.
  */
 SELECT __cat_tools.exec(format($fmt$
-CREATE VIEW _cat_tools.pg_attribute_v AS
+CREATE OR REPLACE VIEW _cat_tools.pg_attribute_v AS
   SELECT %s
       , c.*
       , t.oid AS typoid
@@ -564,6 +535,21 @@ $fmt$
   , __cat_tools.omit_column('pg_catalog.pg_type')
 ));
 REVOKE ALL ON _cat_tools.pg_attribute_v FROM public;
+
+/*
+ * _cat_tools.column in 0.2.0 was built with an unqualified SELECT * across a
+ * LEFT JOIN with pg_constraint, which accidentally included all pg_constraint
+ * columns (conname, contype, etc.) in the view. CREATE OR REPLACE VIEW cannot
+ * drop columns, so we must drop and recreate.
+ *
+ * Drop extension-owned views in reverse dependency order so that
+ * _cat_tools.column can be dropped without CASCADE. This preserves any
+ * user-created objects that depend on cat_tools.column: if such objects exist,
+ * the DROP VIEW below will fail and the user must drop them manually first,
+ * then re-run ALTER EXTENSION cat_tools UPDATE.
+ */
+DROP VIEW cat_tools.column;
+DROP VIEW _cat_tools.column;
 
 /*
  * Rebuild _cat_tools.column with computed columns first and all pg_attribute_v

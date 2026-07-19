@@ -60,11 +60,7 @@ Rules for what to track in git:
    See https://github.com/Postgres-Extensions/pgxntool/issues/51.
 3. Update scripts (e.g. `sql/cat_tools--0.2.1--0.2.2.sql.in`) MUST be tracked — they are
    essential to the update path and have no substitute.
-4. EXCEPTION to rule 2: a minor version that doesn't significantly change the extension
-   (e.g. a small bug fix) is unlikely to cross a PG supported-version boundary, so its
-   generated install script adds little test-coverage value and MAY be omitted (regenerated
-   from `sql/cat_tools.sql.in` at build time). 0.2.3 is such a case — which is why
-   `sql/cat_tools--0.2.3.sql.in` is intentionally NOT tracked.
+4. EXCEPTION to rule 2: a version that changes little AND ships no nontrivial update-path machinery MAY omit its generated install script (little test-coverage value; it is regenerated from `sql/cat_tools.sql.in` at build time). Track it whenever the version carries meaningful changes or a nontrivial update script — a complex update warrants the committed install script for update-test coverage and provenance.
 5. Version-specific files MUST NEVER be edited manually — always edit `sql/cat_tools.sql.in`
    and regenerate.
 
@@ -107,13 +103,19 @@ parse-time error):
   the 0.2.0/0.2.1 install scripts fail on PG11+/PG12+. PG12 is the PostgreSQL floor — PG11 and
   earlier cannot run `ALTER TYPE ... ADD VALUE` in extension update scripts (lifted in PG12).
 - `pg-upgrade-test` binary-`pg_upgrade`s a real database and then runs the suite against it
-  in `existing` mode (`0.2.2` is the oldest version that survives pg_upgrade — pre-0.2.2
-  views reference catalog columns removed in newer PostgreSQL). Two shapes:
+  in `existing` mode. Two shapes:
   - `old_pg>=11`: install `0.2.2` directly → plant guard → pg_upgrade → update to current.
-  - `old_pg=10`: the FULL real-world journey — install `0.2.0`, **bridge-update to `0.2.2` on
-    the old cluster** (the `0.2.0`→`0.2.2` script recreates the views with the pg_upgrade-safe
-    omit_column fix) → plant guard → pg_upgrade → update to current. This proves a `0.2.2`
-    reached via the bridge update (not a fresh install) survives pg_upgrade.
+    A *fresh* `0.2.2` install builds the views with the pg_upgrade-safe `omit_column` (`!= ALL`),
+    so it survives pg_upgrade as-is.
+  - `old_pg=10`: the FULL real-world journey — install `0.2.0`, **bridge-update to `0.2.3` on
+    the old cluster** → plant guard → pg_upgrade → update to current. The bridge must reach
+    `0.2.3`, not `0.2.2`: the shipped `0.2.0`→`0.2.2` / `0.2.1`→`0.2.2` scripts do NOT fix the
+    views (their `omit_column` used the no-op `!= ANY`, leaving `relhasoids`/`relhaspkey` in
+    `_cat_tools.pg_class_v`); the pg_class_v DROP+CREATE rebuild that strips those columns lives
+    in the `0.2.2`→`0.2.3` update. `0.2.3` is also the furthest a PG10 cluster can reach
+    (`0.2.3`→`0.3.0` uses `ALTER TYPE ... ADD VALUE`, unrunnable in an update script before
+    PG12); the post-upgrade step then updates `0.2.3`→current on the new cluster. This proves a
+    `0.2.3` reached via the bridge update (not a fresh install) survives pg_upgrade.
   Both flows plant the dependency guard and run through `bin/test_existing`.
 
 **When working on a new version:** review and expand these matrices. A new version's install
