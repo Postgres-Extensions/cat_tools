@@ -3,17 +3,81 @@ on:
   push:
     branches:
       - master
-    paths-ignore:
-      - '**.md'
-      - '**.asc'
   pull_request:
-    paths-ignore:
-      - '**.md'
-      - '**.asc'
 env:
   PGUSER: postgres
 jobs:
+  # Cheap gate that lets the heavy jobs below skip themselves on commits
+  # that touch only docs. This must run on every push/pull_request (no
+  # paths-ignore on the workflow itself), otherwise the required
+  # all-checks-passed check would never report on doc-only pushes and get
+  # stuck Pending in branch protection.
+  changes:
+    name: 🔍 Detect docs-only changes
+    runs-on: ubuntu-latest
+    outputs:
+      docs_only: ${{ steps.diff.outputs.docs_only }}
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v6
+        with:
+          # Full history needed so BASE and HEAD below are both reachable
+          # for `git diff`.
+          fetch-depth: 0
+      - name: Compute per-push changed files
+        id: diff
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ] && \
+             [ "${{ github.event.action }}" = "synchronize" ] && \
+             [ -n "${{ github.event.before }}" ]; then
+            # A push to an already-open PR: before/after give the true
+            # per-push diff, same as for a branch push.
+            BASE="${{ github.event.before }}"
+            HEAD="${{ github.event.after }}"
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then
+            # First run for this PR (opened/reopened/etc, or synchronize
+            # without a usable before): fall back to the whole base...head
+            # diff.
+            BASE="${{ github.event.pull_request.base.sha }}"
+            HEAD="${{ github.event.pull_request.head.sha }}"
+          else
+            BASE="${{ github.event.before }}"
+            HEAD="${{ github.event.after }}"
+          fi
+
+          echo "base=$BASE"
+          echo "head=$HEAD"
+
+          # Fail-safe: a missing HEAD, or an all-zeros BASE (e.g. a new
+          # branch's first push, where GitHub reports no prior commit),
+          # means we can't compute a real diff. Run the full matrix rather
+          # than risk skipping tests.
+          if [ -z "$HEAD" ] || [ -z "$BASE" ] || [[ "$BASE" =~ ^0+$ ]]; then
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          CHANGED=$(git diff --name-only "$BASE" "$HEAD" || echo __DIFF_FAILED__)
+
+          DOCS_ONLY=true
+          if [ "$CHANGED" = "__DIFF_FAILED__" ] || [ -z "$CHANGED" ]; then
+            DOCS_ONLY=false
+          else
+            while IFS= read -r f; do
+              if ! [[ "$f" =~ \.(md|asc)$ ]]; then
+                DOCS_ONLY=false
+                break
+              fi
+            done <<< "$CHANGED"
+          fi
+
+          echo "changed files:"
+          echo "$CHANGED"
+          echo "docs_only=$DOCS_ONLY" >> "$GITHUB_OUTPUT"
+
   test:
+    needs: [changes]
+    if: needs.changes.outputs.docs_only != 'true'
     strategy:
       matrix:
         pg: [18, 17, 16, 15, 14, 13, 12]
@@ -48,6 +112,8 @@ jobs:
   # the REAL migrated objects in "existing" mode. Catches view/catalog breakage
   # that only surfaces when objects created on an old server are read on a new one.
   pg-upgrade-test:
+    needs: [changes]
+    if: needs.changes.outputs.docs_only != 'true'
     strategy:
       matrix:
         include:
@@ -164,6 +230,8 @@ jobs:
   # sole version where they still load. Complements pg-upgrade-test, which covers
   # the cross-major-version binary upgrade instead.
   extension-update-test:
+    needs: [changes]
+    if: needs.changes.outputs.docs_only != 'true'
     strategy:
       matrix:
         # PG12+: exercise the WIDEST update path we support — CREATE EXTENSION at
@@ -236,10 +304,10 @@ jobs:
   # protection rules. Matrix jobs produce check names like "🐘 PostgreSQL 14"
   # which would all need to be listed individually and updated whenever the
   # matrix changes. This job passes if all others passed or were skipped (e.g.
-  # on a docs-only push with paths-ignore), and fails if any failed or were
-  # cancelled.
+  # the heavy jobs gated off by the `changes` job on a docs-only push), and
+  # fails if any failed or were cancelled.
   all-checks-passed:
-    needs: [test, pg-upgrade-test, extension-update-test]
+    needs: [changes, test, pg-upgrade-test, extension-update-test]
     if: always()
     runs-on: ubuntu-latest
     steps:
