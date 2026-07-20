@@ -37,16 +37,38 @@ Never repeat the same comment verbatim in adjacent code — write it once and re
 
 **Always open PRs against the main repo** (`Postgres-Extensions/cat_tools`), not a fork.
 
+## Pull request descriptions
+
+The maintainer builds the squash commit message from the PR description, so the
+**opening** of the description is used directly as the basis for that commit message.
+Write it accordingly:
+
+- Make the opening stand alone as a good commit message: no leading header/title line
+  (the PR title is the subject), concise, self-contained. Multiple paragraphs are fine.
+- Lead with the substantive change and why. Keep incidental changes (minor doc tweaks,
+  dependency/action version bumps, small cleanups) OUT of the opening — put them lower
+  or omit them; the diff carries those details for anyone who wants them.
+- Do NOT add a marker delimiting the "commit message" from "the rest". Just let the
+  opening carry its own weight, with any extra context following after it.
+- Do NOT hard-wrap paragraphs: write each paragraph as a single long line (blank line
+  between paragraphs). Hard-wrapping at ~80 columns conflicts with how GitHub builds the
+  squash commit message from the description.
+
 ## SQL file conventions
 
 Rules for what to track in git:
 
 0. If a `.sql.in` file exists, track the `.sql.in` and **not** the corresponding `.sql`.
 1. If no `.sql.in` exists, track the `.sql` directly (e.g. historical pre-0.2.0 files).
-2. Version-specific install scripts (e.g. `sql/cat_tools--0.2.2.sql.in`) MUST be tracked.
-3. Update scripts (e.g. `sql/cat_tools--0.2.1--0.2.2.sql.in`) MUST be tracked.
-4. The current version'''s install script (e.g. `sql/cat_tools--0.2.2.sql.in`) is generated
-   by `make` from `sql/cat_tools.sql.in`, but MUST still be tracked (rule 2 applies).
+2. Version-specific install scripts (e.g. `sql/cat_tools--0.2.2.sql.in`) are tracked BY
+   DEFAULT. They enable update testing (install an old version, `ALTER EXTENSION UPDATE`,
+   verify) and, because a new MAJOR PostgreSQL version can unpredictably break installing
+   an OLDER extension version, keeping old versions committed lets CI catch when a version
+   stops installing on a newer PG.
+   See https://github.com/Postgres-Extensions/pgxntool/issues/51.
+3. Update scripts (e.g. `sql/cat_tools--0.2.1--0.2.2.sql.in`) MUST be tracked — they are
+   essential to the update path and have no substitute.
+4. EXCEPTION to rule 2: a version that changes little AND ships no nontrivial update-path machinery MAY omit its generated install script (little test-coverage value; it is regenerated from `sql/cat_tools.sql.in` at build time). Track it whenever the version carries meaningful changes or a nontrivial update script — a complex update warrants the committed install script for update-test coverage and provenance.
 5. Version-specific files MUST NEVER be edited manually — always edit `sql/cat_tools.sql.in`
    and regenerate.
 

@@ -153,6 +153,14 @@ jobs:
           if [ -z "$INSTALLED" ] || [ -z "$EXPECTED" ] || [ "$INSTALLED" != "$EXPECTED" ]; then
             echo "FAIL: installed='$INSTALLED' expected='$EXPECTED'"; exit 1
           fi
+          # Verify the 0.2.2->0.2.3 view rebuild actually FIRED (not just ran). On
+          # PG10 the 0.2.0->0.2.2 path leaves _cat_tools.pg_class_v carrying
+          # relhasoids (the buggy `!= ANY` no-op never stripped it), and the
+          # conditional 0.2.2->0.2.3 repair must detect that and rebuild the view
+          # without it. This is the REAL broken path: on PG12+ relhasoids never
+          # existed, so only PG10 exercises the rebuild. ON_ERROR_STOP makes the
+          # RAISE EXCEPTION fail the step.
+          psql -v ON_ERROR_STOP=1 -c "DO \$\$ BEGIN IF EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = '_cat_tools.pg_class_v'::regclass AND attname = 'relhasoids' AND NOT attisdropped AND attnum > 0) THEN RAISE EXCEPTION 'pg_class_v still exposes relhasoids after update to current -- 0.2.2->0.2.3 rebuild did not fire'; END IF; END \$\$"
       - name: Test update 0.2.1 → 0.2.2
         run: |
           # PG takes the shortest update path, so the 0.2.0->current test above goes
