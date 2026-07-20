@@ -4,7 +4,7 @@
 
 After **every** push, monitor GitHub CI in a background subagent until all jobs pass or a failure is confirmed. Use `gh pr checks <pr> --watch` when the branch has an open PR; otherwise (a branch with no PR yet, or a push to `master`) use `gh run watch` for the pushed commit. Investigate and fix failures immediately rather than leaving them for the user to notice.
 
-(`paths-ignore` in `.github/workflows/ci.yml` skips CI only when the *entire* change set is docs-only — e.g. a docs-only push to `master`, or a PR whose whole diff is `**.md`/`**.asc`. A docs-only commit on a PR that also touches code still triggers CI on the full PR diff. When unsure, check `gh run list` for the pushed commit and monitor whatever run appears; if none does, there is nothing to watch.)
+(`.github/workflows/ci.yml`'s `changes` job computes the actual per-push changed file set and exposes `docs_only`; the heavy `test`, `pg-upgrade-test`, and `extension-update-test` jobs skip when `needs.changes.outputs.docs_only == 'true'` — i.e. every changed file in that push matches `**.md`/`**.asc`. Unlike the old workflow-level `paths-ignore`, this is evaluated per push/commit, not over the whole PR diff, so a doc-only commit on a PR that also touches code still gets the skip, and the workflow (including the required `all-checks-passed` check) always triggers and reports rather than being skipped outright by GitHub. When unsure, check `gh run list` for the pushed commit and monitor whatever run appears; if none does, there is nothing to watch.)
 
 ## Build/test system (pgxntool)
 
