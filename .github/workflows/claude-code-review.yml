@@ -84,6 +84,18 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 1
           persist-credentials: false
+          # actions/checkout added a guard that refuses to check out fork
+          # PR heads under pull_request_target/workflow_run by default
+          # (a "pwn request" mitigation), with this escape hatch for
+          # vetted cases where that's intentional. Originally shipped in
+          # v7.0.0, since backported to the v4/v5/v6 floating major tags
+          # too (confirmed against actions/checkout's live action.yml on
+          # each), so no major-version bump is needed to use it here.
+          # Safe here: gated to the trusted fork owner above, read-only
+          # (persist-credentials: false), and this workflow file itself
+          # always comes from master under pull_request_target, so a PR
+          # can't alter the job that reviews it.
+          allow-unsafe-pr-checkout: true
 
       - name: Run Claude Code Review
         if: steps.gate.outputs.decision == 'run'
