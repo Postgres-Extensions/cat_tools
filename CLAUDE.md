@@ -46,6 +46,23 @@ full URL, e.g. `https://github.com/Postgres-Extensions/cat_tools/issues/28` — 
 number is fine only in GitHub-native text (PR/issue titles and descriptions, review
 comments).
 
+## Pull request descriptions
+
+The maintainer builds the squash commit message from the PR description, so the
+**opening** of the description is used directly as the basis for that commit message.
+Write it accordingly:
+
+- Make the opening stand alone as a good commit message: no leading header/title line
+  (the PR title is the subject), concise, self-contained. Multiple paragraphs are fine.
+- Lead with the substantive change and why. Keep incidental changes (minor doc tweaks,
+  dependency/action version bumps, small cleanups) OUT of the opening — put them lower
+  or omit them; the diff carries those details for anyone who wants them.
+- Do NOT add a marker delimiting the "commit message" from "the rest". Just let the
+  opening carry its own weight, with any extra context following after it.
+- Do NOT hard-wrap paragraphs: write each paragraph as a single long line (blank line
+  between paragraphs). Hard-wrapping at ~80 columns conflicts with how GitHub builds the
+  squash commit message from the description.
+
 ## SQL file conventions
 
 Rules for what to track in git:
