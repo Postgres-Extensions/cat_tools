@@ -199,16 +199,29 @@ jobs:
         run: apt-get install -y rsync
       - name: Install cat_tools (all versions)
         run: make install
-      - name: Test pre-0.2.2 update scripts (0.2.0/0.2.1 → 0.2.2, PG10 only)
+      - name: Test pre-0.2.2 update scripts + 0.2.2→0.2.3 rebuild (PG10 only)
         # 0.2.0/0.2.1 install only on PG10; their update scripts target 0.2.2 (not
         # the current version) and are otherwise never exercised. PG takes the
         # shortest path, so 0.2.0 → 0.2.2 uses the direct 0.2.0--0.2.2 script;
         # starting at 0.2.1 exercises the 0.2.1--0.2.2 script directly. update-check
         # asserts each lands on 0.2.2. No suite runs (0.3.0 needs PG12+).
+        #
+        # The third check exercises the REAL broken path end to end: a 0.2.0
+        # install on PG10 leaves relhasoids in _cat_tools.pg_class_v (the buggy
+        # 0.2.0--0.2.2 omit_column no-op), and updating to 0.2.3 routes through
+        # 0.2.2--0.2.3 (shortest path 0.2.0--0.2.2 then 0.2.2--0.2.3), firing the
+        # conditional rebuild that strips relhasoids. 0.2.3 is the furthest PG10 can
+        # reach (0.2.3--0.3.0 needs PG12+). The psql assertion fails loudly if the
+        # rebuild did not fire (relhasoids still present), explicitly verifying the
+        # rebuild on the broken path -- complementing the stronger 10→18 pg_upgrade
+        # bridge leg. `$$` is escaped as `\$\$` so the shell passes literal dollar
+        # quotes through to psql.
         if: matrix.pg == '10'
         run: |
           bin/test_existing update-check cat_tools_from_020 0.2.0 0.2.2
           bin/test_existing update-check cat_tools_from_021 0.2.1 0.2.2
+          bin/test_existing update-check cat_tools_rebuild_020 0.2.0 0.2.3
+          psql -d cat_tools_rebuild_020 -v ON_ERROR_STOP=1 -c "DO \$\$ BEGIN IF EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid='_cat_tools.pg_class_v'::regclass AND attname='relhasoids' AND NOT attisdropped AND attnum>0) THEN RAISE EXCEPTION 'pg_class_v still exposes relhasoids after update through 0.2.2->0.2.3 -- rebuild did not fire'; END IF; END \$\$"
       - name: Update 0.2.2 → current and run the suite (existing mode, PG12+)
         # update-scenario creates a real database at 0.2.2, plants + proves the
         # dependency guard, ALTER EXTENSION UPDATEs to the current version, and
