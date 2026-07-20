@@ -23,6 +23,14 @@ jobs:
   claude-review:
     # Trusted fork only, and skip drafts (don't spend API/CI on unfinished PRs).
     # To add more trusted owners, extend the head-owner check.
+    #
+    # SECURITY-CRITICAL: this owner check is the ONLY thing that makes
+    # `allow-unsafe-pr-checkout: true` below acceptable. Without it, this
+    # pull_request_target job would check out and let Claude act on
+    # arbitrary fork code while holding base-repo secrets/token — a "pwn
+    # request". Do not remove or loosen this condition (e.g. drop the
+    # owner check, or allow non-owner forks) without re-evaluating the
+    # fork-checkout step's safety.
     if: >-
       github.event.pull_request.draft == false &&
       github.event.pull_request.head.repo.owner.login == 'jnasbyupgrade'
@@ -84,17 +92,11 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 1
           persist-credentials: false
-          # actions/checkout added a guard that refuses to check out fork
-          # PR heads under pull_request_target/workflow_run by default
-          # (a "pwn request" mitigation), with this escape hatch for
-          # vetted cases where that's intentional. Originally shipped in
-          # v7.0.0, since backported to the v4/v5/v6 floating major tags
-          # too (confirmed against actions/checkout's live action.yml on
-          # each), so no major-version bump is needed to use it here.
-          # Safe here: gated to the trusted fork owner above, read-only
-          # (persist-credentials: false), and this workflow file itself
-          # always comes from master under pull_request_target, so a PR
-          # can't alter the job that reviews it.
+          # Unsafe by default (actions/checkout refuses fork-PR checkouts
+          # under pull_request_target/workflow_run). Only OK here because
+          # the job is gated to the project owner's forks — see the `if:`
+          # on the `claude-review` job above; that check is what makes
+          # this safe.
           allow-unsafe-pr-checkout: true
 
       - name: Run Claude Code Review
