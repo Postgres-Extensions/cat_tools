@@ -111,9 +111,9 @@ jobs:
   # newer cluster, then (on new_pg>=12 legs) updates the extension to current and
   # runs the suite against the REAL migrated objects in "existing" mode. Catches
   # view/catalog breakage that only surfaces when objects created on an old server
-  # are read on a new one. The capped new_pg=11 leg cannot reach 0.3.0 (see the
-  # matrix comment) and instead just verifies the bridged 0.2.3 objects + guard
-  # survived pg_upgrade.
+  # are read on a new one. The capped new_pg=11 leg cannot reach the current
+  # version (see the matrix comment) and instead just verifies the bridged 0.2.3
+  # objects + guard survived pg_upgrade.
   pg-upgrade-test:
     needs: [changes]
     if: needs.changes.outputs.docs_only != 'true'
@@ -134,14 +134,15 @@ jobs:
           #
           # update_to caps the POST-upgrade version and gates the two post-upgrade
           # step-pairs below. It is empty on every new_pg>=12 leg: there the
-          # extension is updated to the current version (0.3.0) and the full
-          # existing-mode suite runs. It is set (to 0.2.3) on the new_pg=11 leg
-          # only, because 0.2.3->0.3.0 uses ALTER TYPE ... ADD VALUE, which cannot
-          # run in an extension update script (a pre-PG12 transaction) at all. That
-          # leg stops at 0.2.3 and skips the 0.3.0 suite -- its value is guarding
+          # extension is updated to the current version and the full existing-mode
+          # suite runs. It is set (to 0.2.3) on the new_pg=11 leg only, because
+          # 0.2.3->0.3.0 uses ALTER TYPE ... ADD VALUE, which cannot run in an
+          # extension update script (a pre-PG12 transaction) at all. That leg stops
+          # at 0.2.3 and skips the current-version suite -- its value is guarding
           # the 0.2.x-update and pg_upgrade harness paths all the way back to
           # PG10/11 (proving install-0.2.0 -> update-to-0.2.3 -> pg_upgrade-to-11
-          # and the surviving dependency guard), NOT testing 0.3.0 on PG11.
+          # and the surviving dependency guard), NOT testing the current version
+          # on PG11.
           - old_pg: "10"
             new_pg: "11"
             old_install: "0.2.0"
@@ -163,7 +164,7 @@ jobs:
           # old_pg>=11: 0.2.0/0.2.1 do not install on PG11+, and such users are
           # already on 0.2.2+. A FRESH 0.2.2 install already strips relhasoids/
           # relhaspkey (fixed `!= ALL` omit_column), so it is pg_upgrade-safe with
-          # no bridge. pg_upgrade, then update to current (0.3.0; new_pg>=12).
+          # no bridge. pg_upgrade, then update to the current version (new_pg>=12).
           - old_pg: "11"
             new_pg: "12"
             old_install: "0.2.2"
@@ -278,7 +279,7 @@ jobs:
         # post-upgrade; instead assert the extension is still at the capped version
         # and re-prove the dependency guard survived pg_upgrade. This guards the
         # 0.2.x-update and pg_upgrade harness paths back to PG10/11 without running
-        # the 0.3.0 suite.
+        # the current-version suite.
         if: matrix.update_to != ''
         run: bin/test_existing verify-capped cat_tools_upgrade "${{ matrix.update_to }}"
 
@@ -306,8 +307,10 @@ jobs:
         # the 0.2.2->0.2.3 view rebuild on the broken path can be exercised. They
         # target 0.2.2/0.2.3 (not the current version) and use no
         # ALTER TYPE ... ADD VALUE, so they run on PG10. The PG10 leg runs only
-        # those legacy checks — not the current-version suite (0.3.0 needs PG12+).
-        # See the per-step `if` guards.
+        # those legacy checks — not the current-version suite (the current version
+        # needs PG12+: the 0.2.3->0.3.0 update adds enum values via ALTER TYPE ...
+        # ADD VALUE, unrunnable in a pre-PG12 transaction). See the per-step `if`
+        # guards.
         pg: [18, 17, 16, 15, 14, 13, 12, 10]
     name: ⬆️ Extension update test on PostgreSQL ${{ matrix.pg }}
     runs-on: ubuntu-latest
@@ -333,7 +336,7 @@ jobs:
         # the current version) and are otherwise never exercised. PG takes the
         # shortest path, so 0.2.0 → 0.2.2 uses the direct 0.2.0--0.2.2 script;
         # starting at 0.2.1 exercises the 0.2.1--0.2.2 script directly. update-check
-        # asserts each lands on 0.2.2. No suite runs (0.3.0 needs PG12+).
+        # asserts each lands on 0.2.2. No suite runs (the current version needs PG12+).
         #
         # The rebuild_020/rebuild_021 checks exercise the REAL broken path end to
         # end from BOTH pre-0.2.2 origins: a 0.2.0 (resp. 0.2.1) install on PG10
