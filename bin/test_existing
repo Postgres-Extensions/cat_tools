@@ -33,11 +33,6 @@
 #   update-check DB FROM_VERSION TO_VERSION
 #       Lightweight check that a specific update script applies (no suite).
 #
-#   verify-capped DB EXPECTED_VERSION
-#       Post-upgrade check for a pg_upgrade leg that CANNOT reach the current
-#       version (new_pg < 12): assert the extension is at EXPECTED_VERSION and
-#       re-prove the dependency guard survived pg_upgrade. No update, no suite.
-#
 # Run `bin/test_existing` with no subcommand to print usage.
 #
 # Why the dependency guard: "existing" mode must run the suite against the ACTUAL
@@ -204,22 +199,6 @@ update_check() {
   assert_version "$db" "$to"
 }
 
-# verify-capped DB EXPECTED_VERSION
-#   Post-upgrade check for a pg-upgrade leg whose new_pg CANNOT reach the current
-#   version (new_pg=11: 0.2.3->0.3.0 uses ALTER TYPE ... ADD VALUE, unrunnable in
-#   an extension update script -- a pre-PG12 transaction). The old-cluster bridge
-#   already reached EXPECTED_VERSION (0.2.3), so there is nothing to update
-#   post-upgrade. Assert the extension is still at EXPECTED_VERSION and re-prove
-#   the dependency guard still blocks a non-CASCADE drop (i.e. it survived
-#   pg_upgrade). This proves the install -> update-to-EXPECTED -> pg_upgrade path
-#   completed cleanly and the objects/guard survived, WITHOUT running the current
-#   suite (which the target PostgreSQL cannot support).
-verify_capped() {
-  local db=$1 expected=$2
-  assert_version "$db" "$expected"
-  assert_drop_blocked "$db"
-}
-
 # Run the pgTAP suite against an already-populated database in existing mode.
 # Verifies the extension is at the current version, re-proves the guard still
 # blocks a drop (i.e. it survived the update/upgrade), runs the suite via
@@ -260,7 +239,6 @@ usage() {
   echo "  run-suite DB" >&2
   echo "  update-scenario DB FROM_VERSION" >&2
   echo "  update-check DB FROM_VERSION TO_VERSION" >&2
-  echo "  verify-capped DB EXPECTED_VERSION" >&2
   exit 2
 }
 
@@ -277,7 +255,6 @@ main() {
     run-suite)       run_suite "$@" ;;
     update-scenario) update_scenario "$@" ;;
     update-check)    update_check "$@" ;;
-    verify-capped)   verify_capped "$@" ;;
     *)               usage ;;
   esac
 }
