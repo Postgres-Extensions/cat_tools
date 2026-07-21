@@ -548,6 +548,69 @@ jobs:
         if: matrix.pg != '10'
         run: bin/test_existing update-scenario cat_tools_update 0.2.2
 
+  pg-tle-test:
+    needs: [changes]
+    if: needs.changes.outputs.docs_only != 'true'
+    strategy:
+      matrix:
+        # Current-supported majors, from the single source in the changes job
+        # (see its "Derive ..." step) -- same list the `test` job uses. This
+        # currently happens to line up with pg_tle 1.5.2's own supported range
+        # (12-18, see pgxntool/pgtle_versions.md) too, but that's a coincidence:
+        # if either range moves independently in the future, re-check they
+        # still overlap before assuming this job covers what it claims to.
+        # 1.5.2 itself is what AWS RDS for PostgreSQL 17 currently ships
+        # (RDS PG17.7+, our primary deployment target -- see
+        # https://docs.aws.amazon.com/AmazonRDS/latest/PostgreSQLReleaseNotes/postgresql-versions.html).
+        pg: ${{ fromJSON(needs.changes.outputs.supported_pg) }}
+    name: 🧩 pg_tle ${{ matrix.pg }}
+    runs-on: ubuntu-latest
+    container: pgxn/pgxn-tools
+    env:
+      PGTLE_VERSION: "1.5.2"
+    steps:
+      # A dedicated cluster, never shared with the other jobs in this
+      # workflow: pg_tle requires shared_preload_libraries and mixing
+      # pg_tle/non-pg_tle extension installs on one cluster can misbehave.
+      - name: Start PostgreSQL ${{ matrix.pg }}
+        run: pg-start ${{ matrix.pg }}
+      - name: Check out the repo
+        uses: actions/checkout@v6
+      - name: Install rsync
+        run: apt-get install -y rsync
+      - name: Build and install pg_tle ${{ env.PGTLE_VERSION }}
+        # flex/bison/libkrb5-dev aren't in the pgxn-tools image; pg_tle's build
+        # needs them (guc-file.l, and clientauth.c includes gssapi.h).
+        run: |
+          apt-get install -y flex bison libkrb5-dev
+          git clone --branch v${{ env.PGTLE_VERSION }} --depth 1 https://github.com/aws/pg_tle.git /tmp/pg_tle
+          make -C /tmp/pg_tle install
+      - name: Enable pg_tle and restart PostgreSQL ${{ matrix.pg }}
+        run: |
+          echo "shared_preload_libraries = 'pg_tle'" >> /etc/postgresql/${{ matrix.pg }}/test/postgresql.conf
+          pg_ctlcluster ${{ matrix.pg }} test restart
+          pg_isready -t 30
+      - name: Create pg_tle extension
+        run: psql -c "CREATE EXTENSION pg_tle"
+      - name: Register cat_tools with pg_tle
+        run: make run-pgtle
+      - name: Install cat_tools purely via pg_tle (no filesystem install)
+        # cat_tools is never `make install`ed in this job, so a successful
+        # CREATE EXTENSION here can only be resolving through pg_tle's
+        # registration, not a control file on disk.
+        run: |
+          test ! -e /usr/share/postgresql/${{ matrix.pg }}/extension/cat_tools.control
+          psql -c "CREATE EXTENSION cat_tools"
+      - name: Verify cat_tools works when deployed via pg_tle
+        run: |
+          INSTALLED=$(psql -tAc "SELECT extversion FROM pg_extension WHERE extname = 'cat_tools'")
+          EXPECTED=$(make -s print-PGXNVERSION 2>/dev/null | sed -n 's/.*set to "\(.*\)"$/\1/p')
+          echo "installed=$INSTALLED expected=$EXPECTED"
+          if [ -z "$INSTALLED" ] || [ -z "$EXPECTED" ] || [ "$INSTALLED" != "$EXPECTED" ]; then
+            echo "FAIL: installed='$INSTALLED' expected='$EXPECTED'"; exit 1
+          fi
+          psql -v ON_ERROR_STOP=1 -c "SELECT relname FROM cat_tools.pg_class_v LIMIT 1" > /dev/null
+
   # A single stable check name for use as a required status check in branch
   # protection rules. Matrix jobs produce check names like "🐘 PostgreSQL 14"
   # which would all need to be listed individually and updated whenever the
@@ -555,7 +618,7 @@ jobs:
   # the heavy jobs gated off by the `changes` job on a docs-only push), and
   # fails if any failed or were cancelled.
   all-checks-passed:
-    needs: [changes, test, pg-upgrade-test, pg-upgrade-stepwise, extension-update-test]
+    needs: [changes, test, pg-upgrade-test, pg-upgrade-stepwise, extension-update-test, pg-tle-test]
     if: always()
     runs-on: ubuntu-latest
     steps:
