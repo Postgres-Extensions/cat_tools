@@ -646,7 +646,7 @@ SELECT __cat_tools.create_function(
   , 'relkind cat_tools.relation_relkind'
   , 'cat_tools.relation_type LANGUAGE sql STRICT IMMUTABLE'
   , $body$
-/* Per pg_class.h: relkind 'c' = composite type, 'f' = foreign table, 'm' = materialized view. */
+/* relkind values per pg_class.h. */
 SELECT CASE relkind
   WHEN 'r' THEN 'table'
   WHEN 'i' THEN 'index'

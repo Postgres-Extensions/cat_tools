@@ -202,7 +202,7 @@ DROP SCHEMA __cat_tools;
 CREATE OR REPLACE FUNCTION cat_tools.relation__kind(
   relkind cat_tools.relation_relkind
 ) RETURNS cat_tools.relation_type LANGUAGE sql STRICT IMMUTABLE AS $body$
-/* Per pg_class.h: relkind 'c' = composite type, 'f' = foreign table, 'm' = materialized view. */
+/* relkind values per pg_class.h. */
 SELECT CASE relkind
   WHEN 'r' THEN 'table'
   WHEN 'i' THEN 'index'
