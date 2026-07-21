@@ -108,9 +108,12 @@ jobs:
   # Proves cat_tools survives a BINARY pg_upgrade (in-place catalog migration to a
   # newer PostgreSQL major), not just an in-place extension update. Installs an old
   # cat_tools on an old cluster, plants a dependency guard, binary-pg_upgrades to a
-  # newer cluster, updates the extension to current, then runs the suite against
-  # the REAL migrated objects in "existing" mode. Catches view/catalog breakage
-  # that only surfaces when objects created on an old server are read on a new one.
+  # newer cluster, then (on new_pg>=12 legs) updates the extension to current and
+  # runs the suite against the REAL migrated objects in "existing" mode. Catches
+  # view/catalog breakage that only surfaces when objects created on an old server
+  # are read on a new one. The capped new_pg=11 leg cannot reach 0.3.0 (see the
+  # matrix comment) and instead just verifies the bridged 0.2.3 objects + guard
+  # survived pg_upgrade.
   pg-upgrade-test:
     needs: [changes]
     if: needs.changes.outputs.docs_only != 'true'
@@ -127,15 +130,28 @@ jobs:
           # fresh-vs-update divergences (relhasoids/relhaspkey never stripped from
           # _cat_tools.pg_class_v via the no-op `!= ANY` omit_column), and the
           # 0.2.2->0.2.3 update repairs them (its pg_class_v DROP+CREATE rebuild
-          # strips the dropped columns). 0.2.3 is also the furthest a PG10 cluster
-          # can reach: 0.2.3->0.3.0 uses ALTER TYPE ... ADD VALUE, which cannot run
-          # in an extension update script before PG12. So new_pg must be >= 12 for
-          # the post-upgrade update to current (0.3.0) to succeed -- there is no
-          # new_pg=11 leg (a PG11 target cannot reach 0.3.0).
+          # strips the dropped columns).
+          #
+          # update_to caps the POST-upgrade version and gates the two post-upgrade
+          # step-pairs below. It is empty on every new_pg>=12 leg: there the
+          # extension is updated to the current version (0.3.0) and the full
+          # existing-mode suite runs. It is set (to 0.2.3) on the new_pg=11 leg
+          # only, because 0.2.3->0.3.0 uses ALTER TYPE ... ADD VALUE, which cannot
+          # run in an extension update script (a pre-PG12 transaction) at all. That
+          # leg stops at 0.2.3 and skips the 0.3.0 suite -- its value is guarding
+          # the 0.2.x-update and pg_upgrade harness paths all the way back to
+          # PG10/11 (proving install-0.2.0 -> update-to-0.2.3 -> pg_upgrade-to-11
+          # and the surviving dependency guard), NOT testing 0.3.0 on PG11.
+          - old_pg: "10"
+            new_pg: "11"
+            old_install: "0.2.0"
+            bridge_to: "0.2.3"
+            update_to: "0.2.3"
           - old_pg: "10"
             new_pg: "18"
             old_install: "0.2.0"
             bridge_to: "0.2.3"
+            update_to: ""
           # 0.2.1-origin: same PG10-only bridge journey, exercising the
           # 0.2.1->0.2.2 update script (a different script from 0.2.0->0.2.2)
           # feeding the same 0.2.2->0.2.3 repair, then binary pg_upgrade to PG18.
@@ -143,6 +159,7 @@ jobs:
             new_pg: "18"
             old_install: "0.2.1"
             bridge_to: "0.2.3"
+            update_to: ""
           # old_pg>=11: 0.2.0/0.2.1 do not install on PG11+, and such users are
           # already on 0.2.2+. A FRESH 0.2.2 install already strips relhasoids/
           # relhaspkey (fixed `!= ALL` omit_column), so it is pg_upgrade-safe with
@@ -151,18 +168,22 @@ jobs:
             new_pg: "12"
             old_install: "0.2.2"
             bridge_to: ""
+            update_to: ""
           - old_pg: "11"
             new_pg: "18"
             old_install: "0.2.2"
             bridge_to: ""
+            update_to: ""
           - old_pg: "12"
             new_pg: "13"
             old_install: "0.2.2"
             bridge_to: ""
+            update_to: ""
           - old_pg: "12"
             new_pg: "18"
             old_install: "0.2.2"
             bridge_to: ""
+            update_to: ""
     # Include old_install in the name so matrix legs that differ only by origin
     # version (e.g. the two 10 → 18 legs from 0.2.0 and 0.2.1) get distinct,
     # unambiguous check names.
@@ -198,8 +219,10 @@ jobs:
         # bridge that makes the views pg_upgrade-safe (see prepare-old in the
         # script). It then plants + proves the dependency guard so the later
         # existing-mode run cannot silently drop+reinstall and test a fresh
-        # install instead. The extension is always older than current, so the
-        # post-upgrade ALTER EXTENSION UPDATE has real work to do.
+        # install instead. The extension is always older than current; on
+        # new_pg>=12 legs the post-upgrade ALTER EXTENSION UPDATE therefore has
+        # real work to do, while the capped new_pg=11 leg instead verifies the
+        # bridged 0.2.3 objects survived pg_upgrade (see the post-upgrade steps).
         run: >-
           bin/test_existing prepare-old cat_tools_upgrade
           "${{ matrix.old_install }}" "${{ matrix.bridge_to }}"
@@ -230,10 +253,14 @@ jobs:
                       -name '*.log' 2>/dev/null | sort | xargs -r tail -n +1; exit 1; }
           pg_ctlcluster ${{ matrix.new_pg }} test start
       - name: Update the pg_upgraded extension to the current version
-        # Exercises ALTER EXTENSION UPDATE on genuinely pg_upgraded objects (the
-        # extension binary pg_upgrade just migrated), running the
-        # version-to-version scripts up to the current version. The 0.2.3 -> 0.3.0
-        # script uses ALTER TYPE ... ADD VALUE, which is why new_pg must be >= 12.
+        # new_pg>=12 legs (update_to empty): update to current, then run the full
+        # existing-mode suite (next step). Exercises ALTER EXTENSION UPDATE on
+        # genuinely pg_upgraded objects (the extension binary pg_upgrade just
+        # migrated), running the version-to-version scripts up to the current
+        # version. The 0.2.3 -> 0.3.0 script uses ALTER TYPE ... ADD VALUE, which
+        # is why these two steps require new_pg >= 12 (the PG11 leg is capped and
+        # runs the verify-capped step below instead).
+        if: matrix.update_to == ''
         run: bin/test_existing update cat_tools_upgrade
       - name: Run the suite against the pg_upgraded database (existing mode)
         # run-suite asserts the version, re-proves the dependency guard still
@@ -241,7 +268,19 @@ jobs:
         # suite against the REAL pg_upgraded + updated database via --use-existing
         # (so pg_regress does not drop/recreate it) -- a plain fresh `make test`
         # would silently test a fresh install instead of the migrated objects.
+        if: matrix.update_to == ''
         run: bin/test_existing run-suite cat_tools_upgrade
+      - name: Verify the pg_upgraded extension at the capped version (new_pg=11)
+        # Capped legs (update_to set: the old_pg=10 -> new_pg=11 leg) cannot reach
+        # the current version -- 0.2.3 -> 0.3.0 runs ALTER TYPE ... ADD VALUE,
+        # unrunnable in an extension update script (a pre-PG12 transaction). The
+        # PG10 bridge already reached 0.2.3, so there is nothing to update
+        # post-upgrade; instead assert the extension is still at the capped version
+        # and re-prove the dependency guard survived pg_upgrade. This guards the
+        # 0.2.x-update and pg_upgrade harness paths back to PG10/11 without running
+        # the 0.3.0 suite.
+        if: matrix.update_to != ''
+        run: bin/test_existing verify-capped cat_tools_upgrade "${{ matrix.update_to }}"
 
   # Proves the in-place extension update path: CREATE EXTENSION at an OLD cat_tools
   # version then ALTER EXTENSION UPDATE (no pg_upgrade, same PostgreSQL). On PG12+
