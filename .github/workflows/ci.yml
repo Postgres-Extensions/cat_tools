@@ -118,25 +118,43 @@ jobs:
       matrix:
         include:
           # old_pg=10: the FULL real-world journey for a user on old PostgreSQL +
-          # old cat_tools. 0.2.0 installs on PG10; the BRIDGE update to 0.2.3
-          # (run on PG10, before pg_upgrade) is what makes pg_upgrade safe. The
-          # shipped 0.2.0→0.2.2 / 0.2.1→0.2.2 scripts do NOT fix the views (their
-          # omit_column used the no-op `!= ANY`, so relhasoids/relhaspkey survive
-          # in _cat_tools.pg_class_v); the pg_class_v DROP+CREATE rebuild that
-          # strips those columns lives in the 0.2.2→0.2.3 update. So we must
-          # bridge THROUGH 0.2.3 before pg_upgrade. 0.2.3 is also the furthest a
-          # PG10 cluster can reach: 0.2.3→0.3.0 uses ALTER TYPE ... ADD VALUE,
-          # which cannot run in an extension update script before PG12. After
-          # pg_upgrade to the new cluster, the post-upgrade step updates 0.2.3→
-          # current (0.3.0). This proves a 0.2.2/0.2.3 reached via the bridge
-          # update (not a fresh install) survives pg_upgrade and updates to latest.
+          # old cat_tools. old_install is 0.2.0/0.2.1 -- the only versions that
+          # install on PG10 (PG11 added pg_attribute.attmissingval, PG12+ exposes
+          # oid in SELECT *, so 0.2.0/0.2.1 install ONLY on PG10; the two origins
+          # exercise the two different pre-0.2.2 update scripts). The BRIDGE update
+          # to 0.2.3, run on PG10 BEFORE pg_upgrade, is what makes the objects
+          # pg_upgrade-safe: the shipped 0.2.0->0.2.2 / 0.2.1->0.2.2 scripts leave
+          # fresh-vs-update divergences (relhasoids/relhaspkey never stripped from
+          # _cat_tools.pg_class_v via the no-op `!= ANY` omit_column), and the
+          # 0.2.2->0.2.3 update repairs them (its pg_class_v DROP+CREATE rebuild
+          # strips the dropped columns). 0.2.3 is also the furthest a PG10 cluster
+          # can reach: 0.2.3->0.3.0 uses ALTER TYPE ... ADD VALUE, which cannot run
+          # in an extension update script before PG12. So new_pg must be >= 12 for
+          # the post-upgrade update to current (0.3.0) to succeed -- there is no
+          # new_pg=11 leg (a PG11 target cannot reach 0.3.0).
           - old_pg: "10"
             new_pg: "18"
             old_install: "0.2.0"
             bridge_to: "0.2.3"
+          # 0.2.1-origin: same PG10-only bridge journey, exercising the
+          # 0.2.1->0.2.2 update script (a different script from 0.2.0->0.2.2)
+          # feeding the same 0.2.2->0.2.3 repair, then binary pg_upgrade to PG18.
+          - old_pg: "10"
+            new_pg: "18"
+            old_install: "0.2.1"
+            bridge_to: "0.2.3"
           # old_pg>=11: 0.2.0/0.2.1 do not install on PG11+, and such users are
-          # already on 0.2.2+. Install 0.2.2 directly (no bridge), pg_upgrade,
-          # then update to current.
+          # already on 0.2.2+. A FRESH 0.2.2 install already strips relhasoids/
+          # relhaspkey (fixed `!= ALL` omit_column), so it is pg_upgrade-safe with
+          # no bridge. pg_upgrade, then update to current (0.3.0; new_pg>=12).
+          - old_pg: "11"
+            new_pg: "12"
+            old_install: "0.2.2"
+            bridge_to: ""
+          - old_pg: "11"
+            new_pg: "18"
+            old_install: "0.2.2"
+            bridge_to: ""
           - old_pg: "12"
             new_pg: "13"
             old_install: "0.2.2"
@@ -145,7 +163,10 @@ jobs:
             new_pg: "18"
             old_install: "0.2.2"
             bridge_to: ""
-    name: 🔄 Binary pg_upgrade ${{ matrix.old_pg }} → ${{ matrix.new_pg }}
+    # Include old_install in the name so matrix legs that differ only by origin
+    # version (e.g. the two 10 → 18 legs from 0.2.0 and 0.2.1) get distinct,
+    # unambiguous check names.
+    name: 🔄 Binary pg_upgrade ${{ matrix.old_pg }} → ${{ matrix.new_pg }} (from ${{ matrix.old_install }})
     runs-on: ubuntu-latest
     container: pgxn/pgxn-tools
     env:
@@ -242,10 +263,11 @@ jobs:
         # `ALTER TYPE ... ADD VALUE`, which PG11 and below cannot run in an
         # extension update script (lifted in PG12).
         # PG10: the ONLY version where the pre-0.2.2 install scripts still load,
-        # so the only place the 0.2.0->0.2.2 and 0.2.1->0.2.2 update scripts can
-        # be exercised. They target 0.2.2 (not the current version) and use no
+        # so the only place the 0.2.0->0.2.2 and 0.2.1->0.2.2 update scripts and
+        # the 0.2.2->0.2.3 view rebuild on the broken path can be exercised. They
+        # target 0.2.2/0.2.3 (not the current version) and use no
         # ALTER TYPE ... ADD VALUE, so they run on PG10. The PG10 leg runs only
-        # those two checks — not the current-version suite (0.3.0 needs PG12+).
+        # those legacy checks — not the current-version suite (0.3.0 needs PG12+).
         # See the per-step `if` guards.
         pg: [18, 17, 16, 15, 14, 13, 12, 10]
     name: ⬆️ Extension update test on PostgreSQL ${{ matrix.pg }}
@@ -274,22 +296,27 @@ jobs:
         # starting at 0.2.1 exercises the 0.2.1--0.2.2 script directly. update-check
         # asserts each lands on 0.2.2. No suite runs (0.3.0 needs PG12+).
         #
-        # The third check exercises the REAL broken path end to end: a 0.2.0
-        # install on PG10 leaves relhasoids in _cat_tools.pg_class_v (the buggy
-        # 0.2.0--0.2.2 omit_column no-op), and updating to 0.2.3 routes through
-        # 0.2.2--0.2.3 (shortest path 0.2.0--0.2.2 then 0.2.2--0.2.3), firing the
-        # conditional rebuild that strips relhasoids. 0.2.3 is the furthest PG10 can
-        # reach (0.2.3--0.3.0 needs PG12+). The psql assertion fails loudly if the
-        # rebuild did not fire (relhasoids still present), explicitly verifying the
-        # rebuild on the broken path -- complementing the stronger 10→18 pg_upgrade
-        # bridge leg. `$$` is escaped as `\$\$` so the shell passes literal dollar
-        # quotes through to psql.
+        # The rebuild_020/rebuild_021 checks exercise the REAL broken path end to
+        # end from BOTH pre-0.2.2 origins: a 0.2.0 (resp. 0.2.1) install on PG10
+        # leaves relhasoids in _cat_tools.pg_class_v (the buggy 0.2.0--0.2.2 /
+        # 0.2.1--0.2.2 omit_column no-op), and updating to 0.2.3 routes through
+        # 0.2.2--0.2.3 (shortest path <origin>--0.2.2 then 0.2.2--0.2.3), firing
+        # the conditional rebuild that strips relhasoids. 0.2.3 is the furthest
+        # PG10 can reach (0.2.3--0.3.0 needs PG12+). On PG12+ relhasoids never
+        # existed, so only PG10 exercises the rebuild. The psql assertion fails
+        # loudly if the rebuild did not fire (relhasoids still present) --
+        # complementing the stronger 10→18 pg_upgrade bridge legs. `$$` is escaped
+        # as `\$\$` so the shell passes literal dollar quotes through to psql.
         if: matrix.pg == '10'
         run: |
           bin/test_existing update-check cat_tools_from_020 0.2.0 0.2.2
           bin/test_existing update-check cat_tools_from_021 0.2.1 0.2.2
-          bin/test_existing update-check cat_tools_rebuild_020 0.2.0 0.2.3
-          psql -d cat_tools_rebuild_020 -v ON_ERROR_STOP=1 -c "DO \$\$ BEGIN IF EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid='_cat_tools.pg_class_v'::regclass AND attname='relhasoids' AND NOT attisdropped AND attnum>0) THEN RAISE EXCEPTION 'pg_class_v still exposes relhasoids after update through 0.2.2->0.2.3 -- rebuild did not fire'; END IF; END \$\$"
+          for origin in 020:0.2.0 021:0.2.1; do
+            db="cat_tools_rebuild_${origin%%:*}"
+            from="${origin##*:}"
+            bin/test_existing update-check "$db" "$from" 0.2.3
+            psql -d "$db" -v ON_ERROR_STOP=1 -c "DO \$\$ BEGIN IF EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid='_cat_tools.pg_class_v'::regclass AND attname='relhasoids' AND NOT attisdropped AND attnum>0) THEN RAISE EXCEPTION 'pg_class_v still exposes relhasoids after update through 0.2.2->0.2.3 -- rebuild did not fire'; END IF; END \$\$"
+          done
       - name: Update 0.2.2 → current and run the suite (existing mode, PG12+)
         # update-scenario creates a real database at 0.2.2, plants + proves the
         # dependency guard, ALTER EXTENSION UPDATEs to the current version, and
@@ -337,3 +364,4 @@ jobs:
             echo "One or more jobs failed or were cancelled"
             exit 1
           fi
+# vi: expandtab ts=2 sw=2

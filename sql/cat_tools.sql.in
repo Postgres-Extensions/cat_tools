@@ -1819,11 +1819,13 @@ BEGIN
   END IF;
   RAISE DEBUG 'v_work "%"', v_work;
 
-  -- Get function arguments
-  -- PG11+ uses "EXECUTE FUNCTION"; older versions use "EXECUTE PROCEDURE".
-  -- Note: ::regproc returns the internal pg_temp_N schema name while pg_get_triggerdef
-  -- uses the pg_temp alias, so we match on EXECUTE PROCEDURE/FUNCTION + any non-space
-  -- chars (the function name) rather than the specific function name.
+  /*
+   * Get function arguments. PG11+ uses "EXECUTE FUNCTION"; older versions use
+   * "EXECUTE PROCEDURE". Note: ::regproc returns the internal pg_temp_N schema
+   * name while pg_get_triggerdef uses the pg_temp alias, so we match on EXECUTE
+   * PROCEDURE/FUNCTION + any non-space chars (the function name) rather than the
+   * specific function name.
+   */
   v_execute_clause := E' EXECUTE (?:PROCEDURE|FUNCTION) \\S+\\(';
   v_array := regexp_split_to_array( v_work, v_execute_clause );
   EXECUTE CASE
