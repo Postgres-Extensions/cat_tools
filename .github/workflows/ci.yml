@@ -75,6 +75,43 @@ jobs:
           echo "$CHANGED"
           echo "docs_only=$DOCS_ONLY" >> "$GITHUB_OUTPUT"
 
+  # ---------------------------------------------------------------------------
+  # Test strategy overview
+  #
+  # A cat_tools install can be arrived at three different ways, and each way can
+  # break differently, so each is tested by its own job below (the per-job
+  # comments carry the details; this is the big picture):
+  #
+  #   1. test                  -- FRESH install: CREATE EXTENSION at the current
+  #                               version on every supported PostgreSQL. The
+  #                               baseline a brand-new user gets.
+  #   2. extension-update-test -- IN-PLACE update: CREATE EXTENSION at an OLD
+  #                               version, then ALTER EXTENSION UPDATE (same
+  #                               PostgreSQL, no pg_upgrade). Proves the
+  #                               version-to-version update scripts converge to
+  #                               the SAME objects as a fresh install (reusing the
+  #                               fresh suite + expected output).
+  #   3. pg-upgrade-test       -- BINARY pg_upgrade: install an OLD version on an
+  #                               OLD PostgreSQL major, binary-upgrade the cluster
+  #                               to a NEWER major, then update the extension.
+  #                               Proves objects created on an old server still
+  #                               work when read on a new one.
+  #
+  # Supported update origins are 0.2.0, 0.2.1 and 0.2.2 (0.1.x is unsupported).
+  #
+  # Two PostgreSQL-version floors shape the matrices:
+  #   - The pre-0.2.2 install scripts (0.2.0 / 0.2.1) load ONLY on PG10: PG11
+  #     added pg_attribute.attmissingval and PG12+ exposes the oid system column
+  #     in SELECT *, both of which those old scripts trip over. So the 0.2.0 /
+  #     0.2.1 origins can only start on PG10.
+  #   - The current version requires PG12+, because the 0.2.3->0.3.0 update runs
+  #     ALTER TYPE ... ADD VALUE, which cannot run in a pre-PG12 transaction (and
+  #     an extension update script is one). So on PG10/11 the update and
+  #     pg_upgrade paths are exercised only up to 0.2.3 (the highest version
+  #     reachable there); the point on those versions is to guard the 0.2.x update
+  #     and pg_upgrade paths against regressions, NOT to test current-version
+  #     behavior.
+  # ---------------------------------------------------------------------------
   test:
     needs: [changes]
     if: needs.changes.outputs.docs_only != 'true'
