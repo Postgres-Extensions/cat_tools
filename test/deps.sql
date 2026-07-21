@@ -9,9 +9,9 @@ SET client_min_messages = WARNING;
  * the test/sql/ files). psql variables are session-local, not committed DB
  * state, so they must still be (re)set per test file.
  *
- * The role names are also set by test/install/load.sql (which creates the
- * roles); keep the two in sync. Add any OTHER per-test dependency
- * \set/statements here; committed dependencies belong in test/install/load.sql.
+ * The role names live in exactly one place, test/roles.sql, \i'd here and by
+ * test/install/load.sql (which creates the roles). Add any OTHER per-test
+ * dependency \set/statements here; committed dependencies belong in
+ * test/install/load.sql.
  */
-\set no_use_role cat_tools_testing__no_use_role
-\set use_role cat_tools_testing__use_role
+\i test/roles.sql

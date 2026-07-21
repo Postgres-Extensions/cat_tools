@@ -4,7 +4,7 @@
 
 -- test_role is set in test/deps.sql
 
-SET LOCAL ROLE :use_role;
+SET LOCAL ROLE :"use_role";
 /*
  * Canonical (relkind, kind) pairs per pg_class.h, hard-coded so the assertions
  * below actually verify the mapping rather than re-encoding enum order.
@@ -45,7 +45,7 @@ SELECT is(
   , 'Simple sanity check of relation__relkind()'
 );
 
-SET LOCAL ROLE :no_use_role;
+SET LOCAL ROLE :"no_use_role";
 SELECT throws_ok(
   format( 'SELECT NULL::%I', typename )
   , '42704' -- undefined_object; not exactly correct, but close enough
@@ -69,7 +69,7 @@ SELECT throws_ok(
   ) v(suffix, argtype)
 ;
 
-SET LOCAL ROLE :use_role;
+SET LOCAL ROLE :"use_role";
 
 SELECT is(cat_tools.relation__relkind(kind)::text, relkind, format('SELECT cat_tools.relation_relkind(%L)', kind))
   FROM kinds

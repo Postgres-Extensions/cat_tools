@@ -17,7 +17,7 @@ SELECT lives_ok(
   , 'Create test enum'
 );
 
-SET LOCAL ROLE :no_use_role;
+SET LOCAL ROLE :"no_use_role";
 SELECT throws_ok(
   format( 'SELECT cat_tools.enum_range%s( %L )', suffix, :'test_enum' )
   , '42501'
@@ -27,7 +27,7 @@ SELECT throws_ok(
   FROM unnest( array['', '_srf'] ) AS suffix
 ;
 
-SET LOCAL ROLE :use_role;
+SET LOCAL ROLE :"use_role";
 
 -- This will test both functions
 SELECT results_eq(

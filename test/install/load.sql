@@ -35,14 +35,15 @@
 SET client_min_messages = WARNING;
 
 /*
- * The test-role names, set here and mirrored per-test by test/deps.sql (psql
- * variables are session-local, so both this committed installer and each
- * rolled-back test file must set them). Each :var holds the identifier; the
- * pg_temp helper functions below receive it as a text literal (:'use_role') and
- * quote it via format(%I).
+ * The test-role names live in one place, test/roles.sql, \i'd here and mirrored
+ * per-test by test/deps.sql (psql variables are session-local, so both this
+ * committed installer and each rolled-back test file must set them). Each :var
+ * holds the identifier; the pg_temp helper functions below receive it as a text
+ * literal (:'use_role') and quote it via format(%I); the identifier-position
+ * uses below (GRANT ... TO :"use_role") quote it directly. The names require
+ * quoting, so an unquoted reference would surface as a test failure.
  */
-\set no_use_role cat_tools_testing__no_use_role
-\set use_role cat_tools_testing__use_role
+\i test/roles.sql
 
 /*
  * Mode selection. The Makefile always exports cat_tools.test_load_mode via
@@ -186,12 +187,12 @@ $$;
 SELECT pg_temp.create_role(:'no_use_role');
 SELECT pg_temp.create_role(:'use_role');
 
-GRANT cat_tools__usage TO :use_role;
+GRANT cat_tools__usage TO :"use_role";
 /*
  * PG15+ removed CREATE on the public schema from PUBLIC; grant it explicitly
  * for tests that create shadow names in public to check catalog-lookup
  * correctness.
  */
-GRANT CREATE ON SCHEMA public TO :use_role;
+GRANT CREATE ON SCHEMA public TO :"use_role";
 
 -- vi: expandtab ts=2 sw=2

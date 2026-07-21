@@ -20,7 +20,7 @@ SELECT plan(
   + 2 -- regprocedure()
 );
 
-SET LOCAL ROLE :no_use_role;
+SET LOCAL ROLE :"no_use_role";
 
 SELECT throws_ok(
       format(
@@ -35,7 +35,7 @@ SELECT throws_ok(
   FROM func_calls
 ;
 
-SET LOCAL ROLE :use_role;
+SET LOCAL ROLE :"use_role";
 
 SELECT is(
   :s.function__arg_types($$IN in_int int, INOUT inout_int_array int[], OUT out_char "char", anyelement, boolean DEFAULT false$$)
