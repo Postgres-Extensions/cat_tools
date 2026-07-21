@@ -51,3 +51,5 @@ ROLLBACK;
  * below (PROCESS_UTILITY_QUERY context). This restriction was lifted in PG12.
  */
 \endif
+
+-- vi: expandtab sw=2 ts=2
