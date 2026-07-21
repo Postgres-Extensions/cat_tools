@@ -202,6 +202,7 @@ DROP SCHEMA __cat_tools;
 CREATE OR REPLACE FUNCTION cat_tools.relation__kind(
   relkind cat_tools.relation_relkind
 ) RETURNS cat_tools.relation_type LANGUAGE sql STRICT IMMUTABLE AS $body$
+/* Per pg_class.h: relkind 'c' = composite type, 'f' = foreign table, 'm' = materialized view. */
 SELECT CASE relkind
   WHEN 'r' THEN 'table'
   WHEN 'i' THEN 'index'
@@ -217,6 +218,7 @@ $body$;
 CREATE OR REPLACE FUNCTION cat_tools.relation__relkind(
   kind cat_tools.relation_type
 ) RETURNS cat_tools.relation_relkind LANGUAGE sql STRICT IMMUTABLE AS $body$
+/* Mapping per pg_class.h, same as relation__kind() above. */
 SELECT CASE kind
   WHEN 'table' THEN 'r'
   WHEN 'index' THEN 'i'
@@ -228,3 +230,134 @@ SELECT CASE kind
   WHEN 'materialized view' THEN 'm'
 END::cat_tools.relation_relkind
 $body$;
+
+/*
+ * Converge trigger__parse to the fresh-install body. The published 0.2.0->0.2.2
+ * / 0.2.1->0.2.2 update scripts create this function with a body that hardcodes
+ * ' EXECUTE PROCEDURE ' and omits the empty-args guard; a fresh install has the
+ * corrected body. PG11+ emits EXECUTE FUNCTION, so match either keyword, and
+ * guard empty args (otherwise "cannot determine type of empty array" when
+ * parsing a trigger). CREATE OR REPLACE preserves grants and the comment and has
+ * no dependents to break, so no DROP is needed; it is a no-op on a fresh 0.2.2
+ * (already correct) and a repair on the update path. The signature is identical
+ * to the fresh 0.2.3 definition, and the body below is copied verbatim from
+ * sql/cat_tools.sql.in.
+ */
+CREATE OR REPLACE FUNCTION cat_tools.trigger__parse(
+  trigger_oid oid
+  , OUT trigger_table regclass
+  , OUT timing text
+  , OUT events text[]
+  , OUT defer text
+  , OUT row_statement text
+  , OUT when_clause text
+  , OUT trigger_function regprocedure
+  , OUT function_arguments text[]
+) RETURNS record STABLE LANGUAGE plpgsql AS $body$
+DECLARE
+  r_trigger pg_catalog.pg_trigger;
+  v_triggerdef text;
+  v_create_stanza text;
+  v_on_clause text;
+  v_execute_clause text;
+
+  v_work text;
+  v_array text[];
+BEGIN
+  /*
+   * Do this first to make sure trigger exists.
+   *
+   * TODO: After we no longer support < 9.6, test v_triggerdef for NULL instead
+   * using the extra block here.
+   */
+  BEGIN
+    SELECT * INTO STRICT r_trigger FROM pg_catalog.pg_trigger WHERE oid = trigger_oid;
+  EXCEPTION WHEN no_data_found THEN
+    RAISE EXCEPTION 'trigger with OID % does not exist', trigger_oid
+      USING errcode = 'undefined_object' -- 42704
+    ;
+  END;
+  trigger_table := r_trigger.tgrelid;
+  trigger_function := r_trigger.tgfoid;
+
+  v_triggerdef := pg_catalog.pg_get_triggerdef(trigger_oid, true);
+
+  v_create_stanza := format(
+    'CREATE %sTRIGGER %I '
+    , CASE WHEN r_trigger.tgconstraint=0 THEN '' ELSE 'CONSTRAINT ' END
+    , r_trigger.tgname
+  );
+  -- Strip CREATE [CONSTRAINT] TRIGGER ... off
+  v_work := replace( v_triggerdef, v_create_stanza, '' );
+
+  -- Get BEFORE | AFTER | INSTEAD OF
+  timing := split_part( v_work, ' ', 1 );
+  timing := timing || CASE timing WHEN 'INSTEAD' THEN ' OF' ELSE '' END;
+
+  -- Strip off timing clause
+  v_work := replace( v_work, timing || ' ', '' );
+
+  -- Get array of events (INSERT, UPDATE [OF column, column], DELETE, TRUNCATE)
+  v_on_clause := ' ON ' || r_trigger.tgrelid::pg_catalog.regclass || ' ';
+  v_array := regexp_split_to_array( v_work, v_on_clause );
+  events := string_to_array( v_array[1], ' OR ' );
+  -- Get everything after ON table_name
+  v_work := v_array[2];
+  RAISE DEBUG 'v_work "%"', v_work;
+
+  -- Strip off FROM referenced_table if we have it
+  IF r_trigger.tgconstrrelid<>0 THEN
+    v_work := replace(
+      v_work
+      , 'FROM ' || r_trigger.tgconstrrelid::pg_catalog.regclass || ' '
+      , ''
+    );
+  END IF;
+  RAISE DEBUG 'v_work "%"', v_work;
+
+  -- Get function arguments
+  -- PG11+ uses "EXECUTE FUNCTION"; older versions use "EXECUTE PROCEDURE".
+  -- Note: ::regproc returns the internal pg_temp_N schema name while pg_get_triggerdef
+  -- uses the pg_temp alias, so we match on EXECUTE PROCEDURE/FUNCTION + any non-space
+  -- chars (the function name) rather than the specific function name.
+  v_execute_clause := E' EXECUTE (?:PROCEDURE|FUNCTION) \\S+\\(';
+  v_array := regexp_split_to_array( v_work, v_execute_clause );
+  EXECUTE CASE
+      WHEN trim(rtrim(v_array[2], ')')) = '' THEN 'SELECT ARRAY[]::text[]'
+      ELSE format('SELECT array[ %s ]', rtrim( v_array[2], ')' ))
+    END
+    INTO function_arguments
+  ;
+  RAISE DEBUG 'v_array[2] "%"', v_array[2];
+  -- Get everything prior to EXECUTE PROCEDURE ...
+  v_work := v_array[1];
+  RAISE DEBUG 'v_work "%"', v_work;
+
+  row_statement := (regexp_matches( v_work, 'FOR EACH (ROW|STATEMENT)' ))[1];
+
+  -- Get [ NOT DEFERRABLE | [ DEFERRABLE ] { INITIALLY IMMEDIATE | INITIALLY DEFERRED } ]
+  v_array := regexp_split_to_array( v_work, 'FOR EACH (ROW|STATEMENT)' );
+  RAISE DEBUG 'v_work = "%", v_array = "%"', v_work, v_array;
+  defer := rtrim(v_array[1]);
+
+  IF r_trigger.tgqual IS NOT NULL THEN
+    when_clause := rtrim(
+      (regexp_split_to_array( v_array[2], E' WHEN \\(' ))[2]
+      , ')'
+    );
+  END IF;
+
+  RAISE DEBUG
+$$v_create_stanza = "%"
+  v_on_clause = "%"
+  v_execute_clause = "%"$$
+    , v_create_stanza
+    , v_on_clause
+    , v_execute_clause
+  ;
+
+  RETURN;
+END
+$body$;
+
+-- vi: expandtab ts=2 sw=2
