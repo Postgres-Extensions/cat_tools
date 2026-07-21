@@ -161,7 +161,10 @@ jobs:
             new_pg: "18"
             old_install: "0.2.2"
             bridge_to: ""
-    name: 🔄 Binary pg_upgrade ${{ matrix.old_pg }} → ${{ matrix.new_pg }}
+    # Include old_install in the name so matrix legs that differ only by origin
+    # version (e.g. the two 10 → 18 legs from 0.2.0 and 0.2.1) get distinct,
+    # unambiguous check names.
+    name: 🔄 Binary pg_upgrade ${{ matrix.old_pg }} → ${{ matrix.new_pg }} (from ${{ matrix.old_install }})
     runs-on: ubuntu-latest
     container: pgxn/pgxn-tools
     env:
