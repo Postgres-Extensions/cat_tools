@@ -111,20 +111,25 @@ jobs:
           # -- modelling a user who updates the extension, then binary-upgrades to
           # a newer major.
           #
-          # old_install is 0.2.2 (not the older 0.2.0) deliberately: a database
-          # that reaches 0.2.x via the 0.2.0--0.2.2 update script carries an
-          # UNGUARDED cat_tools.trigger__parse (it lacks the empty-args guard the
-          # fresh install has), which errors with "cannot determine type of empty
-          # array" when the suite parses a trigger on newer PostgreSQL (e.g. PG18).
-          # That is a latent fresh-vs-update divergence in the shipped 0.2.x
-          # scripts, independent of this harness; it is fixed by the 0.2.3->0.3.0
-          # update, so the full 0.2.0 legacy journey belongs on the 0.3.0 branch
-          # (https://github.com/Postgres-Extensions/cat_tools/pull/16). A FRESH
-          # 0.2.2 install has the guarded trigger__parse and already strips
+          # old_install SHOULD be 0.2.0: proving that a database installed at the
+          # OLDEST version can update to 0.2.3 and then survive binary pg_upgrade
+          # is the whole point of this leg. It is TEMPORARILY pinned to a FRESH
+          # 0.2.2 because a 0.2.0-origin database cannot yet survive the journey --
+          # the shipped 0.2.x update scripts have fresh-vs-update divergences that
+          # break on newer PostgreSQL. Specifically cat_tools.trigger__parse as
+          # produced by the update scripts hardcodes `EXECUTE PROCEDURE` (PG11+
+          # needs an `EXECUTE (?:PROCEDURE|FUNCTION)` match) and omits the
+          # empty-args guard, so it errors with "cannot determine type of empty
+          # array" when the suite parses a trigger (surfaces on PG18). (The
+          # pg_class_v view divergence is already repaired by 0.2.2->0.2.3.) A
+          # FRESH 0.2.2 has the corrected trigger__parse and already strips
           # relhasoids/relhaspkey (fixed `!= ALL` omit_column), so it is both
-          # pg_upgrade-safe and free of that divergence. The 0.2.0-only install
-          # and its 0.2.2->0.2.3 view rebuild stay covered by extension-update-test
-          # on PG10.
+          # pg_upgrade-safe and free of that divergence.
+          #
+          # Restore old_install=0.2.0 once the 0.2.2->0.2.3 repair also fixes
+          # trigger__parse (and any remaining divergence) -- that work is in
+          # progress. Meanwhile the 0.2.0-only install and its 0.2.2->0.2.3 view
+          # rebuild stay covered by extension-update-test on PG10.
           - old_pg: "10"
             new_pg: "11"
             old_install: "0.2.2"
