@@ -1,20 +1,17 @@
 -- IF NOT EXISTS will emit NOTICEs, which is annoying
 SET client_min_messages = WARNING;
 
--- Add any test dependency statements here
--- Note: pgTap is loaded by setup.sql
---CREATE EXTENSION IF NOT EXISTS ...;
-
-\i test/.build/active.sql
-
--- Used by several unit tests
+/*
+ * The extension and the test roles are installed ONCE, COMMITTED, before the
+ * suite by test/install/load.sql (pgxntool's test/install feature), instead of
+ * per-test here. So this file no longer runs CREATE EXTENSION or CREATE ROLE:
+ * all it does is (re)set the psql variables the suite references (setup.sql and
+ * the test/sql/ files). psql variables are session-local, not committed DB
+ * state, so they must still be (re)set per test file.
+ *
+ * The role names are also set by test/install/load.sql (which creates the
+ * roles); keep the two in sync. Add any OTHER per-test dependency
+ * \set/statements here; committed dependencies belong in test/install/load.sql.
+ */
 \set no_use_role cat_tools_testing__no_use_role
 \set use_role cat_tools_testing__use_role
-CREATE ROLE :no_use_role;
-CREATE ROLE :use_role;
-
-GRANT cat_tools__usage TO :use_role;
--- PG15+ removed CREATE on public schema from PUBLIC; grant it explicitly for tests
--- that need to create shadow names in public to test catalog lookup correctness.
-GRANT CREATE ON SCHEMA public TO :use_role;
-
