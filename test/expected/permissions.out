@@ -1,0 +1,113 @@
+\set ECHO none
+1..110
+ok 1 - Permission denied trying to execute cat_tools.currval(table_name text, column_name text)
+ok 2 - Permission denied trying to execute cat_tools.enum_range(enum regtype)
+ok 3 - Permission denied trying to execute cat_tools.enum_range_srf(enum regtype)
+ok 4 - Permission denied trying to execute cat_tools.extension__schemas(extension_names name[])
+ok 5 - Permission denied trying to execute cat_tools.extension__schemas(extension_names text)
+ok 6 - Permission denied trying to execute cat_tools.extension__schemas_unique(extension_names name[])
+ok 7 - Permission denied trying to execute cat_tools.extension__schemas_unique(extension_names text)
+ok 8 - Permission denied trying to execute cat_tools.function__arg_types(arguments text)
+ok 9 - Permission denied trying to execute cat_tools.function__arg_types_text(arguments text)
+ok 10 - Permission denied trying to execute cat_tools.get_serial_sequence(table_name text, column_name text)
+ok 11 - Permission denied trying to execute cat_tools.name__check(name_to_check text)
+ok 12 - Permission denied trying to execute cat_tools.nextval(table_name text, column_name text)
+ok 13 - Permission denied trying to execute cat_tools.object__address_classid(object_type cat_tools.object_type)
+ok 14 - Permission denied trying to execute cat_tools.object__address_classid(object_type text)
+ok 15 - Permission denied trying to execute cat_tools.object__catalog(object_type cat_tools.object_type)
+ok 16 - Permission denied trying to execute cat_tools.object__catalog(object_type text)
+ok 17 - Permission denied trying to execute cat_tools.object__is_address_unsupported(object_type cat_tools.object_type)
+ok 18 - Permission denied trying to execute cat_tools.object__is_address_unsupported(object_type text)
+ok 19 - Permission denied trying to execute cat_tools.object__is_shared(object_type cat_tools.object_type)
+ok 20 - Permission denied trying to execute cat_tools.object__is_shared(object_type text)
+ok 21 - Permission denied trying to execute cat_tools.object__reg_type(object_catalog regclass)
+ok 22 - Permission denied trying to execute cat_tools.object__reg_type(object_type cat_tools.object_type)
+ok 23 - Permission denied trying to execute cat_tools.object__reg_type(object_type text)
+ok 24 - Permission denied trying to execute cat_tools.object__reg_type_catalog(object_identifier_type regtype)
+ok 25 - Permission denied trying to execute cat_tools.objects__address_unsupported()
+ok 26 - Permission denied trying to execute cat_tools.objects__address_unsupported_srf()
+ok 27 - Permission denied trying to execute cat_tools.objects__shared()
+ok 28 - Permission denied trying to execute cat_tools.objects__shared_srf()
+ok 29 - Permission denied trying to execute cat_tools.pg_attribute__get(relation regclass, column_name name)
+ok 30 - Permission denied trying to execute cat_tools.pg_class(rel regclass)
+ok 31 - Permission denied trying to execute cat_tools.pg_extension__get(extension_name name)
+ok 32 - Permission denied trying to execute cat_tools.regprocedure(function_name text, arguments text)
+ok 33 - Permission denied trying to execute cat_tools.relation__kind(relkind cat_tools.relation_relkind)
+ok 34 - Permission denied trying to execute cat_tools.relation__kind(relkind text)
+ok 35 - Permission denied trying to execute cat_tools.relation__relkind(kind cat_tools.relation_type)
+ok 36 - Permission denied trying to execute cat_tools.relation__relkind(kind text)
+ok 37 - Permission denied trying to execute cat_tools.sequence__last(table_name text, column_name text)
+ok 38 - Permission denied trying to execute cat_tools.sequence__next(table_name text, column_name text)
+ok 39 - Permission denied trying to execute cat_tools.sequence__set_last(table_name text, column_name text, last_value bigint)
+ok 40 - Permission denied trying to execute cat_tools.sequence__set_next(table_name text, column_name text, next_value bigint)
+ok 41 - Permission denied trying to execute cat_tools.setval(table_name text, column_name text, new_value bigint, has_been_used boolean DEFAULT true)
+ok 42 - Permission denied trying to execute cat_tools.trigger__args_as_text(function_arguments text[])
+ok 43 - Permission denied trying to execute cat_tools.trigger__get_oid(trigger_table regclass, trigger_name text)
+ok 44 - Permission denied trying to execute cat_tools.trigger__get_oid__loose(trigger_table regclass, trigger_name text)
+ok 45 - Permission denied trying to execute cat_tools.trigger__parse(trigger_oid oid, OUT trigger_table regclass, OUT timing text, OUT events text[], OUT defer text, OUT row_statement text, OUT when_clause text, OUT trigger_function regprocedure, OUT function_arguments text[])
+ok 46 - Permission denied trying to execute cat_tools.trigger__parse(trigger_table regclass, trigger_name text, OUT timing text, OUT events text[], OUT defer text, OUT row_statement text, OUT when_clause text, OUT trigger_function regprocedure, OUT function_arguments text[])
+ok 47 - Permission granted to execute cat_tools.currval(table_name text, column_name text)
+ok 48 - Permission granted to execute cat_tools.enum_range(enum regtype)
+ok 49 - Permission granted to execute cat_tools.enum_range_srf(enum regtype)
+ok 50 - Permission granted to execute cat_tools.extension__schemas(extension_names name[])
+ok 51 - Permission granted to execute cat_tools.extension__schemas(extension_names text)
+ok 52 - Permission granted to execute cat_tools.extension__schemas_unique(extension_names name[])
+ok 53 - Permission granted to execute cat_tools.extension__schemas_unique(extension_names text)
+ok 54 - Permission granted to execute cat_tools.function__arg_types(arguments text)
+ok 55 - Permission granted to execute cat_tools.function__arg_types_text(arguments text)
+ok 56 - Permission granted to execute cat_tools.get_serial_sequence(table_name text, column_name text)
+ok 57 - Permission granted to execute cat_tools.name__check(name_to_check text)
+ok 58 - Permission granted to execute cat_tools.nextval(table_name text, column_name text)
+ok 59 - Permission granted to execute cat_tools.object__address_classid(object_type cat_tools.object_type)
+ok 60 - Permission granted to execute cat_tools.object__address_classid(object_type text)
+ok 61 - Permission granted to execute cat_tools.object__catalog(object_type cat_tools.object_type)
+ok 62 - Permission granted to execute cat_tools.object__catalog(object_type text)
+ok 63 - Permission granted to execute cat_tools.object__is_address_unsupported(object_type cat_tools.object_type)
+ok 64 - Permission granted to execute cat_tools.object__is_address_unsupported(object_type text)
+ok 65 - Permission granted to execute cat_tools.object__is_shared(object_type cat_tools.object_type)
+ok 66 - Permission granted to execute cat_tools.object__is_shared(object_type text)
+ok 67 - Permission granted to execute cat_tools.object__reg_type(object_catalog regclass)
+ok 68 - Permission granted to execute cat_tools.object__reg_type(object_type cat_tools.object_type)
+ok 69 - Permission granted to execute cat_tools.object__reg_type(object_type text)
+ok 70 - Permission granted to execute cat_tools.object__reg_type_catalog(object_identifier_type regtype)
+ok 71 - Permission granted to execute cat_tools.objects__address_unsupported()
+ok 72 - Permission granted to execute cat_tools.objects__address_unsupported_srf()
+ok 73 - Permission granted to execute cat_tools.objects__shared()
+ok 74 - Permission granted to execute cat_tools.objects__shared_srf()
+ok 75 - Permission granted to execute cat_tools.pg_attribute__get(relation regclass, column_name name)
+ok 76 - Permission granted to execute cat_tools.pg_class(rel regclass)
+ok 77 - Permission granted to execute cat_tools.pg_extension__get(extension_name name)
+ok 78 - Permission granted to execute cat_tools.regprocedure(function_name text, arguments text)
+ok 79 - Permission granted to execute cat_tools.relation__kind(relkind cat_tools.relation_relkind)
+ok 80 - Permission granted to execute cat_tools.relation__kind(relkind text)
+ok 81 - Permission granted to execute cat_tools.relation__relkind(kind cat_tools.relation_type)
+ok 82 - Permission granted to execute cat_tools.relation__relkind(kind text)
+ok 83 - Permission granted to execute cat_tools.sequence__last(table_name text, column_name text)
+ok 84 - Permission granted to execute cat_tools.sequence__next(table_name text, column_name text)
+ok 85 - Permission granted to execute cat_tools.sequence__set_last(table_name text, column_name text, last_value bigint)
+ok 86 - Permission granted to execute cat_tools.sequence__set_next(table_name text, column_name text, next_value bigint)
+ok 87 - Permission granted to execute cat_tools.setval(table_name text, column_name text, new_value bigint, has_been_used boolean DEFAULT true)
+ok 88 - Permission granted to execute cat_tools.trigger__args_as_text(function_arguments text[])
+ok 89 - Permission granted to execute cat_tools.trigger__get_oid(trigger_table regclass, trigger_name text)
+ok 90 - Permission granted to execute cat_tools.trigger__get_oid__loose(trigger_table regclass, trigger_name text)
+ok 91 - Permission granted to execute cat_tools.trigger__parse(trigger_oid oid, OUT trigger_table regclass, OUT timing text, OUT events text[], OUT defer text, OUT row_statement text, OUT when_clause text, OUT trigger_function regprocedure, OUT function_arguments text[])
+ok 92 - Permission granted to execute cat_tools.trigger__parse(trigger_table regclass, trigger_name text, OUT timing text, OUT events text[], OUT defer text, OUT row_statement text, OUT when_clause text, OUT trigger_function regprocedure, OUT function_arguments text[])
+ok 93 - Permission denied trying to use type cat_tools.column
+ok 94 - Permission denied trying to use type cat_tools.constraint_type
+ok 95 - Permission denied trying to use type cat_tools.object_type
+ok 96 - Permission denied trying to use type cat_tools.pg_all_foreign_keys
+ok 97 - Permission denied trying to use type cat_tools.pg_class_v
+ok 98 - Permission denied trying to use type cat_tools.pg_extension_v
+ok 99 - Permission denied trying to use type cat_tools.procedure_type
+ok 100 - Permission denied trying to use type cat_tools.relation_relkind
+ok 101 - Permission denied trying to use type cat_tools.relation_type
+ok 102 - Permission granted to use type cat_tools.column
+ok 103 - Permission granted to use type cat_tools.constraint_type
+ok 104 - Permission granted to use type cat_tools.object_type
+ok 105 - Permission granted to use type cat_tools.pg_all_foreign_keys
+ok 106 - Permission granted to use type cat_tools.pg_class_v
+ok 107 - Permission granted to use type cat_tools.pg_extension_v
+ok 108 - Permission granted to use type cat_tools.procedure_type
+ok 109 - Permission granted to use type cat_tools.relation_relkind
+ok 110 - Permission granted to use type cat_tools.relation_type
+# TRANSACTION INTENTIONALLY LEFT OPEN!
