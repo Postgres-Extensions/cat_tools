@@ -4,7 +4,7 @@
 
 -- test_role is set in test/deps.sql
 
-SET LOCAL ROLE :use_role;
+SET LOCAL ROLE :"use_role";
 
 CREATE FUNCTION pg_temp.extra_types()
 RETURNS text[] LANGUAGE sql IMMUTABLE AS $$
@@ -72,11 +72,11 @@ SELECT is(
 );
 SELECT is(
   (SELECT count(*)::int FROM obj_type)
-  , 51
+  , 53
   , 'sanity check size of pg_temp.obj_type'
 );
 
-SET LOCAL ROLE :no_use_role;
+SET LOCAL ROLE :"no_use_role";
 SELECT throws_ok(
   format( 'SELECT NULL::%I', typename )
   , '42704' -- undefined_object; not exactly correct, but close enough
@@ -100,7 +100,7 @@ SELECT throws_ok(
   ) v(argtype)
 ;
 
-SET LOCAL ROLE :use_role;
+SET LOCAL ROLE :"use_role";
 
 SELECT function_returns(
   'cat_tools'

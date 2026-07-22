@@ -14,7 +14,7 @@
     "name": "cat_tools",
 
     "X_comment": "REQUIRED. Version of the distribution. http://pgxn.org/spec/#version",
-    "version": "0.2.3",
+    "version": "0.3.0",
 
     "X_comment": "REQUIRED. Short description of distribution.",
     "abstract": "Tools for interfacing with the Postgres catalog",
@@ -37,7 +37,7 @@
             "file": "sql/cat_tools.sql",
 
             "X_comment": "REQUIRED. Version the extension is at.",
-            "version": "0.2.3",
+            "version": "0.3.0",
 
             "X_comment": "Optional: \"abstract\": Description of the extension.",
             "abstract": "Tools for interfacing with the catalog",
@@ -72,7 +72,7 @@
 
         "build": {
             "requires": {
-                "PostgreSQL": "9.2.0"
+                "PostgreSQL": "12.0"
             }
         },
         "runtime": {

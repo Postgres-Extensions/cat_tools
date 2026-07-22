@@ -7,7 +7,7 @@
 
 SELECT plan(5);
 
-SET LOCAL ROLE :no_use_role;
+SET LOCAL ROLE :"no_use_role";
 
 SELECT throws_ok(
   format(
@@ -20,7 +20,7 @@ SELECT throws_ok(
   , 'Verify public has no perms'
 );
 
-SET LOCAL ROLE :use_role;
+SET LOCAL ROLE :"use_role";
 
 SELECT lives_ok(
   format(

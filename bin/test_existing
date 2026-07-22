@@ -160,10 +160,11 @@ update_ext() {
 #   NOT fix the views (their omit_column used the no-op `!= ANY`, leaving
 #   relhasoids/relhaspkey in _cat_tools.pg_class_v); the pg_class_v DROP+CREATE
 #   rebuild that strips those columns lives in the 0.2.2->0.2.3 update, so the
-#   bridge must reach 0.2.3 (the current version). The raw 0.2.0 views reference
-#   catalog columns removed in newer PostgreSQL and would break binary pg_upgrade
-#   otherwise. Then plant + prove the dependency guard (at the bridged version,
-#   so cat_tools.relation_type exists).
+#   bridge must reach 0.2.3. The raw 0.2.0 views reference catalog columns removed
+#   in newer PostgreSQL and would break binary pg_upgrade otherwise. 0.2.3 is also
+#   the furthest a PG10 cluster can reach (0.2.3->0.3.0 uses ALTER TYPE ... ADD
+#   VALUE, unrunnable in an update script before PG12). Then plant + prove the
+#   dependency guard (at the bridged version, so cat_tools.relation_type exists).
 prepare_old() {
   local db=$1 install=$2 bridge=${3:-}
   createdb "$db"
@@ -207,6 +208,7 @@ run_suite() {
   local db=$1
   assert_version "$db" current
   assert_drop_blocked "$db"
+  make check-relkind-source
   # In existing mode pg_regress runs against $db via --use-existing and must NOT
   # create/drop its own database. Two consequences drive the make args below:
   #   1. PGXNTOOL_ENABLE_TEST_BUILD=no: base.mk auto-enables the test-build sanity

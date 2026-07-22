@@ -75,12 +75,56 @@ jobs:
           echo "$CHANGED"
           echo "docs_only=$DOCS_ONLY" >> "$GITHUB_OUTPUT"
 
+  # ===========================================================================
+  # Test strategy
+  #
+  # A cat_tools install can be arrived at several ways, each of which can break
+  # differently, so each is exercised by its own job below (the per-job comments
+  # carry the details; this is the big picture):
+  #
+  #   test                  -- FRESH install: CREATE EXTENSION at the current
+  #                            version on every supported PostgreSQL. The baseline
+  #                            a brand-new user gets.
+  #   extension-update-test -- IN-PLACE update: CREATE EXTENSION at an OLD version
+  #                            then ALTER EXTENSION UPDATE (same PostgreSQL, no
+  #                            pg_upgrade).
+  #   pg-upgrade-test       -- BINARY pg_upgrade, SINGLE jump: install an OLD
+  #                            version on an OLD major, binary-upgrade the cluster
+  #                            straight to a NEWER major (skipping intermediate
+  #                            majors), then update the extension. Proves objects
+  #                            created on an old server work when read on a new one.
+  #   pg-upgrade-stepwise   -- BINARY pg_upgrade, EVERY major in sequence: one
+  #                            cluster climbing 10 -> 11 -> ... -> 18, exercising
+  #                            each individual major-to-major transition in turn.
+  #
+  # Supported update origins are 0.2.0, 0.2.1 and 0.2.2 (0.1.x is unsupported).
+  # 0.2.0 and 0.2.1 are BOTH tested as origins because ALTER EXTENSION UPDATE
+  # takes the shortest path: a 0.2.0 origin updates straight through the
+  # 0.2.0--0.2.2 script and never touches 0.2.1--0.2.2, so starting at 0.2.1 is
+  # the only way to exercise the 0.2.1--0.2.2 update script (spelled out at the
+  # pg-upgrade-test matrix).
+  #
+  # Two PostgreSQL-version floors shape the matrices:
+  #   - The pre-0.2.2 install scripts (0.2.0 / 0.2.1) load ONLY on PG10: PG11
+  #     added pg_attribute.attmissingval and PG12+ exposes the oid system column
+  #     in SELECT *, both of which those old scripts trip over. So a 0.2.0 / 0.2.1
+  #     origin can only start on PG10.
+  #   - The current version needs PG12+: the 0.2.3->0.3.0 update runs
+  #     ALTER TYPE ... ADD VALUE, which cannot run in a pre-PG12 transaction (and
+  #     an extension update script is one).
+  #
+  # KEY invariant: every pg_upgrade leg CLIMBS to a PostgreSQL that supports the
+  # current version, then updates to the current version and runs the full suite
+  # -- no leg stops short. A PG10/11 origin simply HOLDS the extension at 0.2.3
+  # (the highest version reachable on those majors) until the cluster reaches
+  # PG12+, where it is updated to the current version.
+  # ===========================================================================
   test:
     needs: [changes]
     if: needs.changes.outputs.docs_only != 'true'
     strategy:
       matrix:
-        pg: [18, 17, 16, 15, 14, 13, 12, 11, 10]
+        pg: [18, 17, 16, 15, 14, 13, 12]
     name: 🐘 PostgreSQL ${{ matrix.pg }}
     runs-on: ubuntu-latest
     container: pgxn/pgxn-tools
@@ -89,62 +133,68 @@ jobs:
         run: pg-start ${{ matrix.pg }}
       - name: Check out the repo
         uses: actions/checkout@v6
-      - name: Install rsync
-        run: apt-get install -y rsync
+      - name: Install rsync and server headers
+        # postgresql-server-dev-NN provides catalog/pg_class.h, which
+        # test/gen-relkinds.sh reads for the relkind drift check in
+        # test/sql/relation__.sql.
+        run: apt-get install -y rsync postgresql-server-dev-${{ matrix.pg }}
       - name: Test on PostgreSQL ${{ matrix.pg }}
-        run: make test
+        run: |
+          # Fail if the relkind drift source is empty (headers missing): the
+          # drift check must actually run on every version, not pass silently.
+          make check-relkind-source
+          # verify-results is the real gate: base.mk declares `verify-results:
+          # test`, so this runs the suite via its `test` prerequisite and then
+          # checks the pgtap/regression.diffs. A bare `make test` is redundant here
+          # and would not gate anyway -- it never exits non-zero on regressions
+          # (pgxntool marks installcheck `.IGNORE`), so failures would pass silently.
+          make verify-results
 
   # Proves cat_tools survives a BINARY pg_upgrade (in-place catalog migration to a
-  # newer PostgreSQL major), not just an in-place extension update. Installs an old
-  # cat_tools on an old cluster, plants a dependency guard, binary-pg_upgrades to a
-  # newer cluster, updates the extension to current, then runs the suite against
-  # the REAL migrated objects in "existing" mode. Catches view/catalog breakage
-  # that only surfaces when objects created on an old server are read on a new one.
+  # newer PostgreSQL major), not just an in-place extension update. Each leg is a
+  # SINGLE jump: install an old cat_tools on an old cluster, plant a dependency
+  # guard, binary-pg_upgrade STRAIGHT to a newer major (skipping any intermediate
+  # majors), update the extension to the current version, then run the suite
+  # against the REAL migrated objects in "existing" mode. Catches view/catalog
+  # breakage that only surfaces when objects created on an old server are read on a
+  # new one. Every leg's new_pg supports the current version (PG12+); the
+  # version-by-version climb through EVERY major is pg-upgrade-stepwise.
   pg-upgrade-test:
     needs: [changes]
     if: needs.changes.outputs.docs_only != 'true'
     strategy:
       matrix:
         include:
-          # old_pg=10: install an OLD cat_tools on the oldest PostgreSQL, then
-          # BRIDGE-update to 0.2.3 (the current version) on PG10 BEFORE pg_upgrade
-          # -- modelling a user who updates the extension, then binary-upgrades to
-          # a newer major.
+          # old_pg=10 origins: the FULL real-world journey for a user on old
+          # PostgreSQL + old cat_tools. old_install is 0.2.0/0.2.1 -- the only
+          # versions that install on PG10 (PG11 added pg_attribute.attmissingval,
+          # PG12+ exposes oid in SELECT *, so 0.2.0/0.2.1 install ONLY on PG10).
+          # The BRIDGE update to 0.2.3, run on PG10 BEFORE pg_upgrade, makes the
+          # objects pg_upgrade-safe: the shipped 0.2.0->0.2.2 / 0.2.1->0.2.2
+          # scripts leave fresh-vs-update divergences (relhasoids/relhaspkey never
+          # stripped from _cat_tools.pg_class_v via the no-op `!= ANY` omit_column),
+          # and the 0.2.2->0.2.3 update repairs them (its pg_class_v DROP+CREATE
+          # rebuild strips the dropped columns). 0.2.3 is the highest version a
+          # PG10 cluster can hold (0.2.3->0.3.0 needs PG12+); the single jump lands
+          # on a PG12+ major, where the post-upgrade step updates 0.2.3 -> current.
           #
-          # old_install is 0.2.0/0.2.1: the whole point of these legs is proving a
-          # database installed at the OLDEST versions can update to 0.2.3 and then
-          # survive binary pg_upgrade to a newer major. 0.2.0/0.2.1 install ONLY on
-          # PG10 (PG11 added pg_attribute.attmissingval, PG12+ exposes oid in
-          # SELECT *), so these origins can only start here. The bridge to 0.2.3 is
-          # what makes the objects pg_upgrade-safe: the shipped 0.2.0->0.2.2 /
-          # 0.2.1->0.2.2 scripts leave fresh-vs-update divergences (relhasoids/
-          # relhaspkey never stripped from _cat_tools.pg_class_v via the no-op
-          # omit_column; a trigger__parse body that hardcodes `EXECUTE PROCEDURE`
-          # and omits the empty-args guard), and the 0.2.2->0.2.3 update repairs
-          # both -- the pg_class_v rebuild strips the dropped columns, and the
-          # trigger__parse CREATE OR REPLACE matches `EXECUTE (?:PROCEDURE|FUNCTION)`
-          # with the empty-args guard (PG11+ emits EXECUTE FUNCTION). Without the
-          # bridge the raw 0.2.0 views/functions reference catalog state removed in
-          # newer PostgreSQL and break after pg_upgrade (trigger__parse surfaces on
-          # PG18).
-          - old_pg: "10"
-            new_pg: "11"
-            old_install: "0.2.0"
-            bridge_to: "0.2.3"
+          # BOTH 0.2.0 and 0.2.1 appear as origins because ALTER EXTENSION UPDATE
+          # takes the SHORTEST path: a 0.2.0 origin updates straight through the
+          # 0.2.0--0.2.2 script and never exercises 0.2.1--0.2.2, so starting at
+          # 0.2.1 is the ONLY way to exercise the 0.2.1--0.2.2 update script.
           - old_pg: "10"
             new_pg: "18"
             old_install: "0.2.0"
             bridge_to: "0.2.3"
-          # 0.2.1-origin: same PG10-only bridge journey, exercising the
-          # 0.2.1->0.2.2 update script (a different script from 0.2.0->0.2.2)
-          # feeding the same 0.2.2->0.2.3 repair, then binary pg_upgrade to PG18.
           - old_pg: "10"
             new_pg: "18"
             old_install: "0.2.1"
             bridge_to: "0.2.3"
-          # old_pg>=11: such users are already on 0.2.2+. A FRESH 0.2.2 install
-          # already strips relhasoids/relhaspkey (fixed `!= ALL` omit_column), so
-          # it is pg_upgrade-safe with no bridge. pg_upgrade, then update to current.
+          # old_pg>=11: 0.2.0/0.2.1 do not install on PG11+, and such users are
+          # already on 0.2.2+. A FRESH 0.2.2 install already strips relhasoids/
+          # relhaspkey (fixed `!= ALL` omit_column), so it is pg_upgrade-safe with
+          # no bridge. pg_upgrade to a PG12+ major, then update to the current
+          # version.
           - old_pg: "11"
             new_pg: "12"
             old_install: "0.2.2"
@@ -196,8 +246,8 @@ jobs:
         # bridge that makes the views pg_upgrade-safe (see prepare-old in the
         # script). It then plants + proves the dependency guard so the later
         # existing-mode run cannot silently drop+reinstall and test a fresh
-        # install instead. The extension is always older than or equal to
-        # current, so the post-upgrade ALTER EXTENSION UPDATE is exercised too.
+        # install instead. The extension is always older than the current version,
+        # so the post-upgrade ALTER EXTENSION UPDATE always has real work to do.
         run: >-
           bin/test_existing prepare-old cat_tools_upgrade
           "${{ matrix.old_install }}" "${{ matrix.bridge_to }}"
@@ -229,10 +279,9 @@ jobs:
           pg_ctlcluster ${{ matrix.new_pg }} test start
       - name: Update the pg_upgraded extension to the current version
         # Exercises ALTER EXTENSION UPDATE on genuinely pg_upgraded objects (the
-        # extension binary pg_upgrade just migrated), running the
-        # version-to-version scripts up to the current version. A no-op when the
-        # bridge already reached current (old_pg=10), which still verifies UPDATE
-        # does not error on pg_upgraded objects.
+        # extension binary pg_upgrade just migrated), running the version-to-version
+        # scripts up to the current version. The 0.2.3 -> 0.3.0 script uses
+        # ALTER TYPE ... ADD VALUE, which is why every leg's new_pg is >= 12.
         run: bin/test_existing update cat_tools_upgrade
       - name: Run the suite against the pg_upgraded database (existing mode)
         # run-suite asserts the version, re-proves the dependency guard still
@@ -241,6 +290,108 @@ jobs:
         # (so pg_regress does not drop/recreate it) -- a plain fresh `make test`
         # would silently test a fresh install instead of the migrated objects.
         run: bin/test_existing run-suite cat_tools_upgrade
+
+  # Proves cat_tools survives EVERY individual major-to-major binary pg_upgrade
+  # transition, not just a single big jump (that is pg-upgrade-test): ONE cluster
+  # that starts on the oldest origin and climbs through every major in sequence.
+  # Installs 0.2.0 on PG10, bridges to 0.2.3 (the highest version a PG10 cluster
+  # can hold -- see the pg-upgrade-test matrix comment), plants the dependency
+  # guard, then binary-pg_upgrades 10->11->12->...->18 ONE major at a time. The
+  # extension is HELD at 0.2.3 for the 10->11 and 11->12 steps (PG11 cannot run
+  # the 0.2.3->0.3.0 update, which needs PG12+); on reaching PG12 it is updated
+  # 0.2.3 -> the current version, and from PG12 on the full suite runs in existing
+  # mode at EVERY major (12..18) against the REAL pg_upgraded objects, re-proving
+  # the guard survived each step. CI-heavy on purpose: it installs PostgreSQL 10
+  # through 18, performs 8 sequential pg_upgrades, and runs the suite 7 times.
+  pg-upgrade-stepwise:
+    needs: [changes]
+    if: needs.changes.outputs.docs_only != 'true'
+    name: 🪜 Stepwise pg_upgrade 10 → 18 (from 0.2.0)
+    runs-on: ubuntu-latest
+    container: pgxn/pgxn-tools
+    env:
+      # Every pg_upgrade in the climb pairs two clusters that must share initdb
+      # options (checksums, auth), exactly as in pg-upgrade-test.
+      INITDB_OPTS: --data-checksums --auth trust
+      DB: cat_tools_stepwise
+    steps:
+      - name: Start PostgreSQL 10
+        run: pg-start 10
+      - name: Recreate the PG10 cluster with data checksums enabled
+        run: |
+          pg_ctlcluster 10 test stop
+          pg_dropcluster 10 test
+          # -p 5432: force the well-known port (see pg-upgrade-test for why).
+          pg_createcluster -p 5432 10 test -- $INITDB_OPTS
+          pg_ctlcluster 10 test start
+          pg_isready -t 30
+      - name: Check out the repo
+        uses: actions/checkout@v6
+      - name: Install rsync
+        # Must NOT install a newer server-dev yet: `make install` just below runs
+        # with the DEFAULT pg_config, which must still resolve to PG10. Each newer
+        # major's server-dev is installed inside the climb loop, at which point the
+        # default pg_config advances with it (the final-major suite reads that
+        # version's catalog header for the relkind drift check; see the test job).
+        run: apt-get install -y rsync
+      - name: Install cat_tools into the PG10 cluster
+        run: make install
+      - name: Prepare PG10 (install 0.2.0, bridge to 0.2.3, plant guard)
+        run: bin/test_existing prepare-old "$DB" 0.2.0 0.2.3
+      - name: Climb every major via binary pg_upgrade (10 → 11 → ... → 18)
+        # One sequential loop; each iteration binary-pg_upgrades the cluster from
+        # $old to $new (a single major step). cat_tools is a SQL-only extension, so
+        # pg_upgrade only needs its scripts present in the NEW cluster's sharedir:
+        # `make install PG_CONFIG=<new>` before each step (the $old cluster already
+        # has them, from the previous iteration or the PG10 install above). The
+        # extension is held at 0.2.3 until PG12, where it is updated to the current
+        # version; the suite then runs at every major from PG12 on (see the suite
+        # policy inside the loop). The per-step pg_upgrade invocation and log
+        # handling mirror pg-upgrade-test.
+        run: |
+          old=10
+          for new in 11 12 13 14 15 16 17 18; do
+            echo "=== binary pg_upgrade PostgreSQL $old -> $new ==="
+            apt-get install -y postgresql-$new postgresql-server-dev-$new
+            # PG_CONFIG explicit: several majors are installed, so the default
+            # pg_config on PATH may not be $new's.
+            make install PG_CONFIG=/usr/lib/postgresql/$new/bin/pg_config
+            pg_ctlcluster $old test stop
+            pg_createcluster -p 5432 $new test -- $INITDB_OPTS
+            # PG17+ writes logs under the new datadir; older versions to CWD. Dump
+            # both on failure (same handling as pg-upgrade-test).
+            mkdir -p /tmp/pg_upgrade_logs
+            chown postgres:postgres /tmp/pg_upgrade_logs
+            su -c "cd /tmp/pg_upgrade_logs && /usr/lib/postgresql/$new/bin/pg_upgrade \
+              -b /usr/lib/postgresql/$old/bin \
+              -B /usr/lib/postgresql/$new/bin \
+              -d /var/lib/postgresql/$old/test \
+              -D /var/lib/postgresql/$new/test \
+              -o '-c config_file=/etc/postgresql/$old/test/postgresql.conf' \
+              -O '-c config_file=/etc/postgresql/$new/test/postgresql.conf'" postgres \
+              || { find /tmp/pg_upgrade_logs \
+                        /var/lib/postgresql/$new/test/pg_upgrade_output.d \
+                        -name '*.log' 2>/dev/null | sort | xargs -r tail -n +1; exit 1; }
+            pg_ctlcluster $new test start
+            pg_isready -t 30
+            # Suite policy across the climb. We unfortunately CANNOT run the suite
+            # against the OLD version (0.2.3) at the pre-PG12 steps (10->11, 11->12):
+            # the suite matches the CURRENT version's objects and we do not maintain
+            # an old-version expected-output set. So those steps only verify that
+            # 0.2.3 SURVIVES each pg_upgrade -- i.e. the climb completing without
+            # error. On reaching PG12 (the floor for 0.2.3->0.3.0, which needs
+            # ALTER TYPE ... ADD VALUE) update once to the current version; from
+            # PG12 on the extension is at current, so run the full suite in existing
+            # mode at EVERY major (run-suite asserts the version and re-proves the
+            # guard survived this step's pg_upgrade).
+            if [ "$new" = 12 ]; then
+              bin/test_existing update "$DB"
+            fi
+            if [ "$new" -ge 12 ]; then
+              bin/test_existing run-suite "$DB"
+            fi
+            old=$new
+          done
 
   # Proves the in-place extension update path: CREATE EXTENSION at an OLD cat_tools
   # version then ALTER EXTENSION UPDATE (no pg_upgrade, same PostgreSQL). On PG12+
@@ -254,14 +405,22 @@ jobs:
     if: needs.changes.outputs.docs_only != 'true'
     strategy:
       matrix:
-        # The update-scenario legs (0.2.2 -> current + full suite, existing mode)
-        # run on PG12-18. 0.2.2 is the update-from floor: the 0.2.0/0.2.1 install
-        # scripts fail on PG11+/PG12+.
-        # PG10 is the ONLY version where the pre-0.2.2 install scripts still load,
-        # so it is the only place the 0.2.0->0.2.2 / 0.2.1->0.2.2 update scripts
-        # and the 0.2.2->0.2.3 view rebuild on the broken path can be exercised.
-        # It runs only those legacy checks (no current-version suite; that is
-        # covered on PG10 by the `test` job). See the per-step `if` guards.
+        # PG12+: exercise the WIDEST update path we support — CREATE EXTENSION at
+        # the 0.2.2 backward-compat floor, ALTER EXTENSION UPDATE to the CURRENT
+        # version, and run the full suite against the updated database. 0.2.2 is
+        # the floor because the 0.2.0/0.2.1 install scripts fail on PG11+/PG12+;
+        # PG12 is the PostgreSQL floor because the update runs
+        # `ALTER TYPE ... ADD VALUE`, which PG11 and below cannot run in an
+        # extension update script (lifted in PG12).
+        # PG10: the ONLY version where the pre-0.2.2 install scripts still load,
+        # so the only place the 0.2.0->0.2.2 and 0.2.1->0.2.2 update scripts and
+        # the 0.2.2->0.2.3 view rebuild on the broken path can be exercised. They
+        # target 0.2.2/0.2.3 (not the current version) and use no
+        # ALTER TYPE ... ADD VALUE, so they run on PG10. The PG10 leg runs only
+        # those legacy checks — not the current-version suite (the current version
+        # needs PG12+: the 0.2.3->0.3.0 update adds enum values via ALTER TYPE ...
+        # ADD VALUE, unrunnable in a pre-PG12 transaction). See the per-step `if`
+        # guards.
         pg: [18, 17, 16, 15, 14, 13, 12, 10]
     name: ⬆️ Extension update test on PostgreSQL ${{ matrix.pg }}
     runs-on: ubuntu-latest
@@ -271,23 +430,32 @@ jobs:
         run: pg-start ${{ matrix.pg }}
       - name: Check out the repo
         uses: actions/checkout@v6
+      - name: Install rsync and server headers
+        # server-dev provides catalog/pg_class.h for the relkind drift check
+        # (see the "test" job); required so check-relkind-source below passes.
+        # PG10 runs only the legacy-script checks (no suite), so it needs no headers.
+        if: matrix.pg != '10'
+        run: apt-get install -y rsync postgresql-server-dev-${{ matrix.pg }}
       - name: Install rsync
+        if: matrix.pg == '10'
         run: apt-get install -y rsync
       - name: Install cat_tools (all versions)
         run: make install
       - name: Test pre-0.2.2 update scripts + 0.2.2→0.2.3 rebuild (PG10 only)
         # 0.2.0/0.2.1 install only on PG10; their update scripts target 0.2.2 (not
-        # the current version) and are otherwise never exercised. PG takes the
-        # shortest path, so 0.2.0 → 0.2.2 uses the direct 0.2.0--0.2.2 script;
-        # starting at 0.2.1 exercises the 0.2.1--0.2.2 script directly. update-check
-        # asserts each lands on 0.2.2.
+        # the current version) and are otherwise never exercised. Both origins are
+        # checked because ALTER EXTENSION UPDATE takes the shortest path (see the
+        # pg-upgrade-test matrix): 0.2.0 goes via the 0.2.0--0.2.2 script, 0.2.1 via
+        # 0.2.1--0.2.2. update-check asserts each lands on 0.2.2. No suite runs (the
+        # current version needs PG12+).
         #
         # The rebuild_020/rebuild_021 checks exercise the REAL broken path end to
         # end from BOTH pre-0.2.2 origins: a 0.2.0 (resp. 0.2.1) install on PG10
         # leaves relhasoids in _cat_tools.pg_class_v (the buggy 0.2.0--0.2.2 /
         # 0.2.1--0.2.2 omit_column no-op), and updating to 0.2.3 routes through
         # 0.2.2--0.2.3 (shortest path <origin>--0.2.2 then 0.2.2--0.2.3), firing
-        # the conditional rebuild that strips relhasoids. On PG12+ relhasoids never
+        # the conditional rebuild that strips relhasoids. 0.2.3 is the furthest
+        # PG10 can reach (0.2.3--0.3.0 needs PG12+). On PG12+ relhasoids never
         # existed, so only PG10 exercises the rebuild. The psql assertion fails
         # loudly if the rebuild did not fire (relhasoids still present) --
         # complementing the stronger 10→18 pg_upgrade bridge legs. `$$` is escaped
@@ -319,7 +487,7 @@ jobs:
   # the heavy jobs gated off by the `changes` job on a docs-only push), and
   # fails if any failed or were cancelled.
   all-checks-passed:
-    needs: [changes, test, pg-upgrade-test, extension-update-test]
+    needs: [changes, test, pg-upgrade-test, pg-upgrade-stepwise, extension-update-test]
     if: always()
     runs-on: ubuntu-latest
     steps:

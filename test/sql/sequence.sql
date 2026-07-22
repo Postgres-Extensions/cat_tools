@@ -4,7 +4,7 @@
 
 -- test_role is set in test/deps.sql
 
-SET LOCAL ROLE :use_role;
+SET LOCAL ROLE :"use_role";
 
 CREATE TEMP TABLE seqtest(s serial);
 CREATE TEMP TABLE functions(fname name);
@@ -29,7 +29,7 @@ SELECT plan((
 )::int);
 
 GRANT SELECT ON functions TO public;
-SET LOCAL ROLE :no_use_role;
+SET LOCAL ROLE :"no_use_role";
 SELECT throws_ok(
   format( $$SELECT cat_tools.%I('seqtest', 's')$$, fname )
   , '42501' -- insufficient_privilege
@@ -39,7 +39,7 @@ SELECT throws_ok(
   FROM functions
 ;
 
-SET LOCAL ROLE :use_role;
+SET LOCAL ROLE :"use_role";
 
 SELECT function_returns( sname, fname, 'bigint'::regtype::text ) FROM fv;
 SELECT volatility_is( sname, fname, 'volatile' ) FROM fv;

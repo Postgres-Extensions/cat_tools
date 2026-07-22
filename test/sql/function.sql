@@ -3,77 +3,67 @@
 \i test/setup.sql
 
 \set s cat_tools
-CREATE TEMP VIEW func_calls AS
-  SELECT * FROM (VALUES
-    ('function__arg_types'::name, $$'x'$$::text)
-    , ('regprocedure'::name, $$'x', 'x'$$)
-  ) v(fname, args)
-;
-GRANT SELECT ON func_calls TO public;
+\set _s _cat_tools
 
 SELECT plan(
-  0
-  + (SELECT count(*)::int FROM func_calls)
-
-  + 4 -- function__arg_types()
-
-  + 2 -- regprocedure()
+    2 -- security definer checks for _cat_tools helpers
+  + 1 -- regprocedure()
+  + 4 -- deprecated function__arg_types() wrappers
 );
 
-SET LOCAL ROLE :no_use_role;
+/*
+ * CRITICAL SECURITY TESTS: Helper functions must NOT be SECURITY DEFINER.
+ * If they were, they could be exploited for SQL injection since they execute
+ * dynamic SQL.
+ */
 
-SELECT throws_ok(
-      format(
-        $$SELECT %I.%I( %L )$$
-        , :'s', fname
-        , args
-      )
-      , '42501'
-      , NULL
-      , 'Verify public has no perms'
-    )
-  FROM func_calls
-;
+\set f function__arg_to_regprocedure
+\set args_text 'text, text, text'
+SELECT string_to_array(:'args_text', ', ') AS args \gset
+SELECT isnt_definer(:'_s', :'f', :'args'::name[]);
 
-SET LOCAL ROLE :use_role;
+\set f function__drop_temp
+\set args_text 'regprocedure, text'
+SELECT string_to_array(:'args_text', ', ') AS args \gset
+SELECT isnt_definer(:'_s', :'f', :'args'::name[]);
 
+/*
+ * Deprecated wrappers call through to routine__parse_arg_types, which has a
+ * security check that throws when current_user != session_user.  SET SESSION
+ * AUTHORIZATION satisfies that check for the rest of this file.
+ */
+SET SESSION AUTHORIZATION :"use_role";
+
+SELECT is(
+  :s.regprocedure('array_length', 'anyarray, integer')
+  , 'array_length(anyarray,integer)'::regprocedure
+  , 'Verify regprocedure()'
+);
+
+-- Test deprecated wrapper functions still work
+\set VERBOSITY terse
 SELECT is(
   :s.function__arg_types($$IN in_int int, INOUT inout_int_array int[], OUT out_char "char", anyelement, boolean DEFAULT false$$)
   , '{int,int[],anyelement,boolean}'::regtype[]
-  , 'Verify function__arg_types() with INOUT and OUT'
+  , 'Verify deprecated function__arg_types() with INOUT and OUT'
 );
 
 SELECT is(
-  :s.function__arg_types($$IN in_int int, INOUT inout_int_array int[], anyarray, anyelement, boolean DEFAULT false$$)
-  , '{int,int[],anyarray,anyelement,boolean}'::regtype[]
-  , 'Verify function__arg_types() with just INOUT'
+  :s.function__arg_types($$int, text$$)
+  , '{int,text}'::regtype[]
+  , 'Verify deprecated function__arg_types() with simple args'
 );
 
 SELECT is(
-  :s.function__arg_types($$IN in_int int, OUT out_char "char", anyarray, anyelement, boolean DEFAULT false$$)
-  , '{int,anyarray,anyelement,boolean}'::regtype[]
-  , 'Verify function__arg_types() with just OUT'
+  :s.function__arg_types_text($$IN in_int int, INOUT inout_int_array int[], OUT out_char "char", anyelement, boolean DEFAULT false$$)
+  , 'integer, integer[], anyelement, boolean'
+  , 'Verify deprecated function__arg_types_text() with INOUT and OUT'
 );
 
 SELECT is(
-  :s.function__arg_types($$anyelement, "char", pg_class, VARIADIC boolean[]$$)
-  , '{anyelement,"\"char\"",pg_class,boolean[]}'::regtype[]
-  , 'Verify function__arg_types() with only inputs'
-);
-
-\set args 'anyarray, OUT text, OUT "char", pg_class, int, VARIADIC boolean[]'
-SELECT lives_ok(
-  format(
-    $$CREATE FUNCTION pg_temp.test_function(%s) LANGUAGE plpgsql AS $body$BEGIN NULL; END$body$;$$
-    , :'args'
-  )
-  , format('Create pg_temp.test_function(%s)', :'args')
-);
-
-SELECT is(
-  :s.regprocedure( 'pg_temp.test_function', :'args' )
-  , 'pg_temp.test_function'::regproc::regprocedure
-  , 'Verify regprocedure()'
+  :s.function__arg_types_text($$int, text$$)
+  , 'integer, text'
+  , 'Verify deprecated function__arg_types_text() with simple args'
 );
 
 \i test/pgxntool/finish.sql

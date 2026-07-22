@@ -29,6 +29,7 @@ GRANT SELECT ON cat_functions TO :"use_role", :"no_use_role";
 SELECT plan(
     (SELECT count(*)::int FROM cat_types) * 2      -- no_use denied + use allowed
   + (SELECT count(*)::int FROM cat_functions) * 2  -- no_use denied + use allowed
+  + 2                                              -- _cat_tools schema access (no_use denied + use allowed)
 );
 
 /*
@@ -77,13 +78,24 @@ SELECT lives_ok(
 ;
 
 /*
- * No _cat_tools schema-level USAGE check here: as of 0.2.3, nothing in
- * _cat_tools is called at runtime by a public cat_tools function, so
- * cat_tools__usage is never granted USAGE on it. A later cat_tools version
- * that adds internal helpers callable from the public API (and grants
- * cat_tools__usage USAGE on _cat_tools accordingly) should add that check
- * back here.
+ * _cat_tools schema access checks.
+ *
+ * Schema-level USAGE is the primary barrier: no_use_role cannot resolve any
+ * object name in _cat_tools, making its functions effectively private.
+ * function__arg_to_regprocedure and function__drop_temp also have explicit
+ * REVOKE EXECUTE FROM PUBLIC for defense in depth.
  */
+SELECT is(
+    has_schema_privilege(:'no_use_role', '_cat_tools', 'USAGE')
+    , false
+    , 'no_use_role has no USAGE on _cat_tools schema'
+);
+
+SELECT is(
+    has_schema_privilege(:'use_role', '_cat_tools', 'USAGE')
+    , true
+    , 'use_role has USAGE on _cat_tools schema'
+);
 
 \i test/pgxntool/finish.sql
 

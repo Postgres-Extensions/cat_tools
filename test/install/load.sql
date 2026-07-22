@@ -6,8 +6,13 @@
  * pg_regress session, BEFORE the main pgTAP suite. Because its state is
  * committed it persists into every test and runs ONCE instead of per-test
  * (pgTAP rolls back each test/sql/ file, so tests read these objects but never
- * modify them). Committing also mirrors a real production update: ALTER
- * EXTENSION UPDATE commits, then later transactions use the updated objects.
+ * modify them). Committing also MATTERS for correctness in update mode: the
+ * update to the current version runs ALTER TYPE ... ADD VALUE on
+ * cat_tools.relation_relkind / relation_type, and PostgreSQL forbids USING a
+ * newly added enum value in the same transaction that added it (SQLSTATE 55P04,
+ * "unsafe use of new value"). The suite uses those values, so the update must be
+ * committed before the suite runs -- mirroring a real production update (ALTER
+ * EXTENSION UPDATE commits, then later transactions use the new values).
  * deps.sql (run per-test) installs nothing; it only sets the psql variables the
  * suite references.
  *
@@ -25,24 +30,23 @@
  *     validates. It only asserts presence + current version, then creates the
  *     test roles.
  *
- * Version floor:
- *   - 0.2.2 is the default update-from floor: it is the OLDEST cat_tools
- *     version that installs cleanly on PG11+ (the 0.2.0/0.2.1 install scripts
- *     fail on PG11+/PG12+), so it is the WIDEST update path this harness can
- *     exercise across the supported PostgreSQL range -- not a claim that we
- *     only care about 0.2.2.
+ * Version floors:
+ *   - 0.2.2 is the OLDEST cat_tools version that installs cleanly on the
+ *     supported PostgreSQL range (PG12+); the 0.2.0/0.2.1 install scripts fail
+ *     on PG11+/PG12+. It is the default update-from floor -- the WIDEST update
+ *     path we can exercise here -- not a claim that we only care about 0.2.2.
+ *   - PG12 is the PostgreSQL floor: ALTER TYPE ... ADD VALUE cannot run inside
+ *     a transaction block (or an extension update script) at all before PG12.
  */
 SET client_min_messages = WARNING;
 
 /*
- * The test-role names, set here and mirrored per-test by test/deps.sql (psql
- * variables are session-local, so both this committed installer and each
- * rolled-back test file must set them). Each :var holds the identifier; the
- * pg_temp helper functions below receive it as a text literal (:'use_role') and
- * quote it via format(%I).
+ * The test-role names come from test/roles.sql (the single source of truth,
+ * also loaded per-test by test/deps.sql). Each :var holds the RAW identifier;
+ * we quote it at every use site (:"use_role" for CREATE ROLE / GRANT, :'use_role'
+ * for the pg_temp helper text arguments).
  */
-\set no_use_role cat_tools_testing__no_use_role
-\set use_role cat_tools_testing__use_role
+\i test/roles.sql
 
 /*
  * Mode selection. The Makefile always exports cat_tools.test_load_mode via
@@ -110,7 +114,8 @@ $DO$;
  * pg_temp.drop_role(): DROP OWNED BY first strips privileges granted TO the role
  * (e.g. CREATE on public, cat_tools__usage membership) so DROP ROLE cannot fail
  * with a dependency error; the pg_roles guard skips a not-yet-existing role
- * (DROP OWNED BY errors on one), and format(%I) quotes the name correctly.
+ * (DROP OWNED BY errors on one), and format(%I) quotes the name correctly for
+ * the test roles (which contain spaces and mixed case, so they must be quoted).
  */
 DROP EXTENSION IF EXISTS cat_tools CASCADE;
 
@@ -186,12 +191,12 @@ $$;
 SELECT pg_temp.create_role(:'no_use_role');
 SELECT pg_temp.create_role(:'use_role');
 
-GRANT cat_tools__usage TO :use_role;
+GRANT cat_tools__usage TO :"use_role";
 /*
  * PG15+ removed CREATE on the public schema from PUBLIC; grant it explicitly
  * for tests that create shadow names in public to check catalog-lookup
  * correctness.
  */
-GRANT CREATE ON SCHEMA public TO :use_role;
+GRANT CREATE ON SCHEMA public TO :"use_role";
 
 -- vi: expandtab ts=2 sw=2

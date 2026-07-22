@@ -81,6 +81,85 @@ installcheck: sql/cat_tools.sql $(versioned_out)
 EXTRA_CLEAN += sql/cat_tools.sql $(versioned_out)
 
 #
+# relkind drift source generation
+#
+# Generate the canonical set of pg_class.relkind values from the server headers
+# we are building against, for the relkind drift check in test/sql/relation__.sql.
+# The output is gitignored (per-version). When postgresql-server-dev-NN is not
+# installed the script emits an empty view so `make test` still works locally;
+# CI runs check-relkind-source (below) so a missing header can never let the
+# drift check pass silently, and `make test` warns about it locally.
+RELKIND_SRC = test/.generated/pg_class_relkinds.sql
+
+# Absolute path to the header we extract relkinds from. Computed each `make`;
+# it changes when we build against a different PostgreSQL (pg_config differs).
+RELKIND_HEADER := $(shell $(PG_CONFIG) --includedir-server)/catalog/pg_class.h
+
+# Stamp recording the header path. FORCE runs the recipe every time, but it only
+# rewrites the stamp (bumping its mtime) when the path actually changed, so the
+# source is regenerated after a PostgreSQL-version switch even though the old
+# header file itself is untouched. This is the same "name-derive the source"
+# trick as versioned_out, but for a source (a server header) that lives OUTSIDE
+# the tree: we cannot glob it into the dependency graph reliably, so we track its
+# PATH in a committed-shaped stamp file instead.
+RELKIND_STAMP = test/.generated/.relkind-header-path
+
+# Directory the generated files live in. It is listed as an ORDER-ONLY
+# prerequisite (after `|`) on the stamp and source recipes below: the directory
+# must exist before we write into it, but we must NOT rebuild those files just
+# because the directory changed. A directory's mtime bumps every time a file is
+# added to or removed from it, so as a normal prerequisite it would force
+# needless regeneration on every run; after `|` it means "ensure it exists, but
+# its timestamp is not a rebuild trigger."
+test/.generated:
+	@mkdir -p $@
+
+.PHONY: FORCE
+FORCE:
+
+$(RELKIND_STAMP): FORCE | test/.generated
+	@echo '$(RELKIND_HEADER)' | cmp -s - "$@" 2>/dev/null || echo '$(RELKIND_HEADER)' > "$@"
+
+# Real file target (not .PHONY): regenerate only when the generator, the header
+# file, or the header path change -- not on every `make`. $(wildcard ...) yields
+# no prereq (rather than an error) when the header is absent, in which case
+# gen-relkinds.sh emits an empty view.
+$(RELKIND_SRC): test/gen-relkinds.sh $(RELKIND_STAMP) $(wildcard $(RELKIND_HEADER)) | test/.generated
+	test/gen-relkinds.sh "$(RELKIND_HEADER)" > "$@"
+
+.PHONY: gen-relkinds
+gen-relkinds: $(RELKIND_SRC)
+
+testdeps: $(RELKIND_SRC)
+EXTRA_CLEAN += $(RELKIND_SRC) $(RELKIND_STAMP)
+
+# Guard for CI: fail if the relkind source has no relkinds (server headers
+# missing), so the drift check in test/sql/relation__.sql cannot silently pass
+# on an empty view. CI runs `make check-relkind-source` before `make test` on
+# every PostgreSQL version; local `make test` stays lenient (see
+# warn-relkind-source).
+.PHONY: check-relkind-source
+check-relkind-source: $(RELKIND_SRC)
+	@grep -q 'RELKIND_' $(RELKIND_SRC) || { \
+	  echo "ERROR: PostgreSQL catalog header not found at"; \
+	  echo "         $(RELKIND_HEADER)"; \
+	  echo "       so the relkind drift check in test/sql/relation__.sql would"; \
+	  echo "       pass without running. Install this PostgreSQL version's server"; \
+	  echo "       development headers so that path exists."; \
+	  exit 1; \
+	}
+	@echo "check-relkind-source: $(RELKIND_SRC) is populated"
+
+# Non-fatal counterpart, run at the end of `make test`: warn (do not fail) when
+# the drift source is empty because the server headers are missing, so a local
+# run without postgresql-server-dev-NN makes clear the drift check did not run.
+# Listed as a `test` prerequisite after base.mk's, so it runs once tests are done.
+.PHONY: warn-relkind-source
+warn-relkind-source: $(RELKIND_SRC)
+	@grep -q 'RELKIND_' $(RELKIND_SRC) || echo "WARNING: PostgreSQL catalog header not found at $(RELKIND_HEADER); the relkind drift check in test/sql/relation__.sql did NOT run. Install this PostgreSQL version's server development headers to enable it."
+test: warn-relkind-source
+
+#
 # Versioned-SQL generation from .sql.in
 #
 # 9.x version-conditional markers (dotted, e.g. -- SED: REQUIRES/PRIOR TO 9.5!)

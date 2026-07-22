@@ -1,0 +1,41 @@
+\set ECHO none
+1..38
+ok 1 - Verify count from kinds
+ok 2 - Simple sanity check of relation__kind()
+ok 3 - Simple sanity check of relation__relkind()
+ok 4 - SELECT cat_tools.relation_relkind('table')
+ok 5 - SELECT cat_tools.relation_relkind('index')
+ok 6 - SELECT cat_tools.relation_relkind('sequence')
+ok 7 - SELECT cat_tools.relation_relkind('toast table')
+ok 8 - SELECT cat_tools.relation_relkind('view')
+ok 9 - SELECT cat_tools.relation_relkind('composite type')
+ok 10 - SELECT cat_tools.relation_relkind('foreign table')
+ok 11 - SELECT cat_tools.relation_relkind('materialized view')
+ok 12 - SELECT cat_tools.relation_relkind('partitioned table')
+ok 13 - SELECT cat_tools.relation_relkind('partitioned index')
+ok 14 - SELECT cat_tools.relation_type('r')
+ok 15 - SELECT cat_tools.relation_type('i')
+ok 16 - SELECT cat_tools.relation_type('S')
+ok 17 - SELECT cat_tools.relation_type('t')
+ok 18 - SELECT cat_tools.relation_type('v')
+ok 19 - SELECT cat_tools.relation_type('c')
+ok 20 - SELECT cat_tools.relation_type('f')
+ok 21 - SELECT cat_tools.relation_type('m')
+ok 22 - SELECT cat_tools.relation_type('p')
+ok 23 - SELECT cat_tools.relation_type('I')
+ok 24 - cat_tools handles every relkind defined in pg_class.h
+ok 25 - Verify public has no perms
+ok 26 - pg_catalog.pg_class is not a temp relation
+ok 27 - Create shared temp table for is_temp/is_catalog/column_names tests
+ok 28 - temp relation is correctly identified as temp
+ok 29 - NULL input returns NULL (STRICT function)
+ok 30 - Verify public has no perms
+ok 31 - pg_catalog.pg_class is in pg_catalog schema
+ok 32 - temp relation is not in pg_catalog schema
+ok 33 - NULL input returns NULL (STRICT function)
+ok 34 - Verify public has no perms
+ok 35 - Temp table returns expected column names
+ok 36 - Drop middle column from temp table
+ok 37 - Temp table with dropped column returns expected column names
+ok 38 - NULL input returns NULL (STRICT function)
+# TRANSACTION INTENTIONALLY LEFT OPEN!

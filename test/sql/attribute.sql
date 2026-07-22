@@ -18,7 +18,7 @@ SELECT plan(
   + 4 -- pg_attribute__get()
 );
 
-SET LOCAL ROLE :no_use_role;
+SET LOCAL ROLE :"no_use_role";
 
 SELECT throws_ok(
       format(
@@ -33,7 +33,7 @@ SELECT throws_ok(
   FROM func_calls
 ;
 
-SET LOCAL ROLE :use_role;
+SET LOCAL ROLE :"use_role";
 
 /*
  * pg_attribute__get()

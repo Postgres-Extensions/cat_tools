@@ -37,6 +37,15 @@ Never repeat the same comment verbatim in adjacent code — write it once and re
 
 **Always open PRs against the main repo** (`Postgres-Extensions/cat_tools`), not a fork.
 
+## References to PRs and issues in committed files
+
+Any reference to a GitHub PR or issue inside a **committed file** (SQL/code comments,
+`.github/workflows/ci.yml` comments, `CLAUDE.md`, `test/install/load.sql`, docs) MUST be a
+full URL, e.g. `https://github.com/Postgres-Extensions/cat_tools/issues/28` — never a bare
+`#28` (a bare number is meaningless when the file is read outside GitHub). Referencing by
+number is fine only in GitHub-native text (PR/issue titles and descriptions, review
+comments).
+
 ## Pull request descriptions
 
 The maintainer builds the squash commit message from the PR description, so the
@@ -72,18 +81,61 @@ Rules for what to track in git:
 5. Version-specific files MUST NEVER be edited manually — always edit `sql/cat_tools.sql.in`
    and regenerate.
 
-## CI: extension-update-test matrix
+## CI: PostgreSQL version support
 
-The `extension-update-test` job in `.github/workflows/ci.yml` is currently restricted to
-`pg: [10]` because that is the only PostgreSQL version where the pre-0.2.2 install scripts
-install cleanly:
-- PG 11 added `attmissingval` (pseudo-type `anyarray`) to `pg_attribute`; the old `SELECT *`
-  in `0.2.0`/`0.2.1` tries to include it directly, failing with "column attmissingval has
-  pseudo-type anyarray".
-- PG 12+ exposed the `oid` system column in `SELECT *`, breaking `0.2.0`/`0.2.1` with
-  "column oid specified more than once".
+**Policy:** Never support a fresh install on any PostgreSQL version where the extension
+update path is known to be broken — a version that cannot be updated to is not truly
+supported.
 
-**When working on a new version:** review and expand this matrix. The new version's install
+Both PG10 and PG11 are dropped as of 0.3.0. The `ALTER TYPE ... ADD VALUE` statements in
+the update script cannot run inside an extension update script on PG11 or earlier
+(PROCESS_UTILITY_QUERY context); this restriction was lifted in PG12. Because a version
+that cannot be updated to is not truly supported, PG10 and PG11 support is dropped
+entirely. cat_tools 0.3.0 supports PG12+.
+
+### Test-load modes (`TEST_LOAD_SOURCE`)
+
+`test/install/load.sql` installs the suite's dependencies once, committed, before the pgTAP
+suite. The Makefile exports the mode (and update range) as placeholder GUCs via `PGOPTIONS`;
+`TEST_LOAD_SOURCE` must be `fresh`, `update`, or `existing` (anything else is a hard
+parse-time error):
+
+- **fresh** (default): `CREATE EXTENSION cat_tools` at the current version.
+- **update**: `CREATE EXTENSION` at `TEST_UPDATE_FROM` (default `0.2.2`) then
+  `ALTER EXTENSION cat_tools UPDATE` — to `TEST_UPDATE_TO` if set, else to the current
+  version. Running the SAME suite/expected output asserts an updated database behaves
+  identically to a fresh install. `make test-update` is the shorthand.
+- **existing**: the extension is ALREADY installed (by binary `pg_upgrade`, or an
+  `ALTER EXTENSION UPDATE` performed outside the suite). load.sql does not touch it; it only
+  asserts presence + current version and creates the test roles. Pair with
+  `CONTRIB_TESTDB=<db> EXTRA_REGRESS_OPTS=--use-existing` so `pg_regress` runs against that
+  database instead of dropping/recreating a throwaway one.
+
+### CI jobs
+
+- `extension-update-test` exercises the widest update path we support — `0.2.2` → current
+  in `update` mode — on `pg: [12..18]`, plus a PG10-only leg that exercises the pre-0.2.2
+  update scripts (`0.2.0`→`0.2.2` and `0.2.1`→`0.2.2`, which install only on PG10 and target
+  `0.2.2`, not the current version). `0.2.2` is the update-from floor only for backward-compat:
+  the 0.2.0/0.2.1 install scripts fail on PG11+/PG12+. PG12 is the PostgreSQL floor — PG11 and
+  earlier cannot run `ALTER TYPE ... ADD VALUE` in extension update scripts (lifted in PG12).
+- `pg-upgrade-test` binary-`pg_upgrade`s a real database and then runs the suite against it
+  in `existing` mode. Two shapes:
+  - `old_pg>=11`: install `0.2.2` directly → plant guard → pg_upgrade → update to current.
+    A *fresh* `0.2.2` install builds the views with the pg_upgrade-safe `omit_column` (`!= ALL`),
+    so it survives pg_upgrade as-is.
+  - `old_pg=10`: the FULL real-world journey — install `0.2.0`, **bridge-update to `0.2.3` on
+    the old cluster** → plant guard → pg_upgrade → update to current. The bridge must reach
+    `0.2.3`, not `0.2.2`: the shipped `0.2.0`→`0.2.2` / `0.2.1`→`0.2.2` scripts do NOT fix the
+    views (their `omit_column` used the no-op `!= ANY`, leaving `relhasoids`/`relhaspkey` in
+    `_cat_tools.pg_class_v`); the pg_class_v DROP+CREATE rebuild that strips those columns lives
+    in the `0.2.2`→`0.2.3` update. `0.2.3` is also the furthest a PG10 cluster can reach
+    (`0.2.3`→`0.3.0` uses `ALTER TYPE ... ADD VALUE`, unrunnable in an update script before
+    PG12); the post-upgrade step then updates `0.2.3`→current on the new cluster. This proves a
+    `0.2.3` reached via the bridge update (not a fresh install) survives pg_upgrade.
+  Both flows plant the dependency guard and run through `bin/test_existing`.
+
+**When working on a new version:** review and expand these matrices. A new version's install
 script may support more PG versions, enabling testing of the update path from older
 cat_tools versions on newer PostgreSQL.
 
@@ -100,6 +152,16 @@ Always use block comment format for multi-line comments in SQL files:
 ```
 
 Never use `--` line comments for multi-line explanations.
+
+### Closing non-indentable blocks
+When closing a code block that cannot be indented to show its nesting (e.g. SQL
+`\endif`, `DO $$...$$`, shell heredocs, column-0 `fi`/`esac`) AND that block
+contains nested blocks, label the closer with a comment naming which block it
+closes — e.g. shell `esac  # basename dispatch`, or a named dollar-quote
+`DO $DO$ ... $DO$` for a DO block. Where the language rejects a trailing comment
+on the closer (psql `\endif` warns "extra argument ignored"), put the label on
+the immediately following line instead (e.g. `\endif` then
+`-- end \if :cat_tools_mode_existing`).
 
 ### Terminology
 "upgrade" refers to a PostgreSQL cluster (`pg_upgrade`); "update" refers to an extension

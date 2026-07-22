@@ -38,9 +38,14 @@ PGXNTOOL_ENABLE_TEST_INSTALL = yes
 # is a hard error at parse time (so e.g. `make test TEST_LOAD_SOURCE=typo` fails
 # fast rather than defaulting).
 #
-# The install runs COMMITTED (in test/install, not in deps.sql's per-test
-# transaction) so it happens once, before the suite, and persists into every
-# rolled-back test. See test/install/load.sql.
+# An update must be committed (which is why it lives in test/install, not in
+# deps.sql's per-test transaction): the update to the current version runs
+# ALTER TYPE ... ADD VALUE, and a newly added enum value cannot be USED in the
+# transaction that added it (55P04). See test/install/load.sql.
+#
+# update mode requires PG12+ when it targets the current version (ALTER TYPE
+# ... ADD VALUE cannot run in a transaction at all before PG12); CI restricts it
+# accordingly.
 TEST_LOAD_SOURCE ?= fresh
 ifeq ($(filter $(TEST_LOAD_SOURCE),fresh update existing),)
 $(error TEST_LOAD_SOURCE must be 'fresh', 'update' or 'existing', got '$(TEST_LOAD_SOURCE)')
@@ -60,10 +65,11 @@ export PGOPTIONS := $(PGOPTIONS) -c cat_tools.test_load_mode=$(TEST_LOAD_SOURCE)
 test-update:
 	$(MAKE) test TEST_LOAD_SOURCE=update
 
-# Versioned SQL is generated from .sql.in at build time. That generation and the
-# DATA list that installs it live in sql.mk, which also owns
-# `include pgxntool/base.mk` (base.mk has no include guard, so it must be
-# included exactly once; sql.mk includes it at its top). sql.mk documents the
+# Versioned SQL is generated from .sql.in at build time. That generation, the
+# DATA list that installs it, and the relkind drift source all live in sql.mk,
+# which also owns `include pgxntool/base.mk` (base.mk has no include guard, so it
+# must be included exactly once; sql.mk includes it at its top). This Makefile
+# therefore does NOT include base.mk itself -- only sql.mk. sql.mk documents the
 # GNU Make two-phase (parse vs. recipe) hazards involved (e.g.
 # https://github.com/Postgres-Extensions/cat_tools/issues/28) and relies on
 # base.mk/control.mk/PGXS vars (EXTENSION_VERSION_FILES, PG_CONFIG, MAJORVER,
