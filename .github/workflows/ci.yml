@@ -12,11 +12,21 @@ jobs:
   # paths-ignore on the workflow itself), otherwise the required
   # all-checks-passed check would never report on doc-only pushes and get
   # stuck Pending in branch protection.
+  #
+  # It also derives, from a SINGLE set of constants, the supported-PostgreSQL-
+  # major lists that the test / extension-update / stepwise jobs consume (see
+  # the "Derive ..." step). Because those lists live here and every heavy job
+  # already needs this job, adding a PG major is a one-line edit with no new job.
   changes:
-    name: 🔍 Detect docs-only changes
+    name: 🔍 Detect changes & derive PG matrix
     runs-on: ubuntu-latest
     outputs:
       docs_only: ${{ steps.diff.outputs.docs_only }}
+      # Derived PG-major lists (see the "Derive ..." step for their meaning).
+      supported_pg: ${{ steps.pg.outputs.supported_pg }}
+      update_pg: ${{ steps.pg.outputs.update_pg }}
+      climb_pg: ${{ steps.pg.outputs.climb_pg }}
+      legacy_pg: ${{ steps.pg.outputs.legacy_pg }}
     steps:
       - name: Check out the repo
         uses: actions/checkout@v6
@@ -75,6 +85,56 @@ jobs:
           echo "$CHANGED"
           echo "docs_only=$DOCS_ONLY" >> "$GITHUB_OUTPUT"
 
+      - name: Derive the supported-PostgreSQL-major lists
+        id: pg
+        run: |
+          # Spending 20+ lines to replace a handful of version references looks
+          # silly on the surface, but the point is CONSISTENCY: every job -- the
+          # fresh-install `test` matrix, the `extension-update-test` matrix and
+          # the stepwise climb -- derives its PostgreSQL set from this ONE source,
+          # so they cannot drift onto different version lists.
+          #
+          # SINGLE SOURCE OF TRUTH for the supported PostgreSQL majors. To add
+          # or drop a PG major, edit ONLY the three constants below; the test,
+          # extension-update-test and pg-upgrade-stepwise jobs all derive their
+          # version lists from them (adding the newest major is a one-line NEWEST
+          # bump). Do NOT hardcode a supported major in any job matrix or loop.
+          #
+          #   NEWEST        -- highest PostgreSQL major cat_tools is tested on.
+          #   CURRENT_FLOOR -- oldest major the CURRENT extension version supports:
+          #                    the 0.2.3->0.3.0 update runs ALTER TYPE ... ADD
+          #                    VALUE, which cannot run in a pre-PG12 transaction.
+          #   LEGACY_FLOOR  -- oldest major the pre-0.2.2 install scripts still
+          #                    load on (PG11 added pg_attribute.attmissingval and
+          #                    PG12+ exposes the oid system column in SELECT *, both
+          #                    of which those old scripts trip over). Only the
+          #                    update and stepwise paths reach back this far.
+          NEWEST=18
+          CURRENT_FLOOR=12
+          LEGACY_FLOOR=10
+
+          # supported = CURRENT_FLOOR..NEWEST (newest-first). The FRESH-install
+          # matrix (test job) runs exactly these.
+          supported=$(seq "$NEWEST" -1 "$CURRENT_FLOOR")
+          # update = supported plus the legacy floor: the extension-update job
+          # additionally exercises the PG10-only pre-0.2.2 update scripts.
+          update="$supported $LEGACY_FLOOR"
+          # climb = LEGACY_FLOOR+1 .. NEWEST (ascending). The stepwise job starts
+          # one cluster on the legacy floor and binary-pg_upgrades through every
+          # later major in turn, so its targets are every major above the floor.
+          climb=$(seq $((LEGACY_FLOOR + 1)) "$NEWEST")
+
+          # Emit a JSON array from a list of ints, for the job matrices to
+          # consume with fromJSON (GitHub evaluates a literal dollar-brace
+          # expression even inside a run block, so none is written here).
+          json() { printf '%s\n' "$@" | paste -sd, - | sed 's/^/[/; s/$/]/'; }
+
+          echo "supported_pg=$(json $supported)" >> "$GITHUB_OUTPUT"
+          echo "update_pg=$(json $update)" >> "$GITHUB_OUTPUT"
+          echo "legacy_pg=$LEGACY_FLOOR" >> "$GITHUB_OUTPUT"
+          # Space-separated for direct iteration in the stepwise bash loop.
+          echo "climb_pg=$(echo $climb)" >> "$GITHUB_OUTPUT"
+
   # ===========================================================================
   # Test strategy
   #
@@ -124,7 +184,8 @@ jobs:
     if: needs.changes.outputs.docs_only != 'true'
     strategy:
       matrix:
-        pg: [18, 17, 16, 15, 14, 13, 12]
+        # Current-supported majors, from the single source in the changes job.
+        pg: ${{ fromJSON(needs.changes.outputs.supported_pg) }}
     name: 🐘 PostgreSQL ${{ matrix.pg }}
     runs-on: ubuntu-latest
     container: pgxn/pgxn-tools
@@ -314,6 +375,10 @@ jobs:
       # options (checksums, auth), exactly as in pg-upgrade-test.
       INITDB_OPTS: --data-checksums --auth trust
       DB: cat_tools_stepwise
+      # Climb targets and starting (legacy) major, from the single source in the
+      # changes job -- so a new PG major joins the climb with no edit here.
+      CLIMB_PG: ${{ needs.changes.outputs.climb_pg }}
+      LEGACY_PG: ${{ needs.changes.outputs.legacy_pg }}
     steps:
       - name: Start PostgreSQL 10
         run: pg-start 10
@@ -349,8 +414,8 @@ jobs:
         # policy inside the loop). The per-step pg_upgrade invocation and log
         # handling mirror pg-upgrade-test.
         run: |
-          old=10
-          for new in 11 12 13 14 15 16 17 18; do
+          old=$LEGACY_PG
+          for new in $CLIMB_PG; do
             echo "=== binary pg_upgrade PostgreSQL $old -> $new ==="
             apt-get install -y postgresql-$new postgresql-server-dev-$new
             # PG_CONFIG explicit: several majors are installed, so the default
@@ -421,7 +486,10 @@ jobs:
         # needs PG12+: the 0.2.3->0.3.0 update adds enum values via ALTER TYPE ...
         # ADD VALUE, unrunnable in a pre-PG12 transaction). See the per-step `if`
         # guards.
-        pg: [18, 17, 16, 15, 14, 13, 12, 10]
+        #
+        # Current-supported majors + the legacy PG10 floor, from the single
+        # source in the changes job (update_pg = supported_pg plus legacy_pg).
+        pg: ${{ fromJSON(needs.changes.outputs.update_pg) }}
     name: ⬆️ Extension update test on PostgreSQL ${{ matrix.pg }}
     runs-on: ubuntu-latest
     container: pgxn/pgxn-tools
