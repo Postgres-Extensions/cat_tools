@@ -576,15 +576,28 @@ jobs:
         run: pg-start ${{ matrix.pg }}
       - name: Check out the repo
         uses: actions/checkout@v6
-      - name: Snapshot filesystem extension control files (pre-pg_tle baseline)
-        # Whatever ships on disk by default (e.g. contrib) before we install
-        # anything. bin/assert_fs_clean's later checks diff against this, so
-        # they flag ANY extension that lands on disk instead of being
-        # registered via pg_tle -- not just cat_tools -- without hardcoding
-        # contrib names.
-        run: bin/assert_fs_clean snapshot ${{ matrix.pg }} /tmp/control_baseline.txt
       - name: Install rsync
         run: apt-get install -y rsync
+      - name: Install pgtap (test harness dependency)
+        # pgTAP is a filesystem-installed dependency of the TEST HARNESS, not
+        # part of what this job proves is pg_tle-only -- it's not being
+        # deployed via pg_tle here, and never will be. `bin/test_existing`'s
+        # pg_tle-mode run_suite calls `make testdeps`, which would otherwise
+        # filesystem-install pgTAP for the first time partway through the job
+        # and trip the contamination checks below (confirmed happening in a
+        # real CI run). Installing it explicitly here, before the baseline
+        # snapshot, makes it part of the accepted starting state -- like any
+        # other extension already on disk -- instead of needing a hardcoded
+        # exclude-by-name rule that would erode the whole point of diffing
+        # against a baseline.
+        run: make pgtap
+      - name: Snapshot filesystem extension control files (pre-pg_tle baseline)
+        # Whatever ships on disk by default (e.g. contrib, and now pgtap)
+        # before we install pg_tle. bin/assert_fs_clean's later checks diff
+        # against this, so they flag ANY extension that lands on disk instead
+        # of being registered via pg_tle -- not just cat_tools -- without
+        # hardcoding contrib/pgtap names.
+        run: bin/assert_fs_clean snapshot ${{ matrix.pg }} /tmp/control_baseline.txt
       - name: Build and install pg_tle ${{ env.PGTLE_VERSION }}
         # flex/bison/libkrb5-dev aren't in the pgxn-tools image; pg_tle's build
         # needs them (guc-file.l, and clientauth.c includes gssapi.h).
