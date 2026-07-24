@@ -201,8 +201,25 @@ endef
 
 # The recipe builds $@.tmp then moves it into place atomically.
 # TODO: refactor the version handling into a function.
+#
+# The boundary/divider @generated@ markers (added by the echo's above, plus
+# any standalone ones already in the source used as visual section dividers)
+# are matched anchored to the WHOLE line -- not a plain substring -- so an
+# @generated@ that coincidentally appears as a trailing annotation on a real
+# code line (there are a few in cat_tools.sql.in) is left untouched instead
+# of being clobbered into generic marker text. $* (the %-match) tells apart a
+# version-specific file (stem contains --, e.g. cat_tools--0.2.2) from the
+# master (stem is just cat_tools): version files get an extra "VERSIONED
+# FILE!" tag up front so it's obvious at a glance that the file is a frozen
+# snapshot that must never be hand-edited.
 sql/%.sql: sql/%.sql.in pgxntool/safesed
-	(echo @generated@ && cat $< && echo @generated@) | sed -e 's#@generated@#-- GENERATED FILE! DO NOT EDIT! See $<#' > $@.tmp
+	(echo @generated@ && cat $< && echo @generated@) | awk -v src='$<' -v stem='$*' '\
+		/^@generated@$$/ { \
+			if (stem ~ /--/) print "-- VERSIONED FILE! GENERATED FILE! DO NOT EDIT! See " src; \
+			else              print "-- GENERATED FILE! DO NOT EDIT! See " src; \
+			next \
+		} \
+		{ print }' > $@.tmp
 	$(_apply_version_seds)
 	mv $@.tmp $@
 
@@ -216,7 +233,14 @@ $(EXTENSION_VERSION_FILES:.sql=.sql.in): sql/cat_tools.sql.in cat_tools.control
 # cat_tools.sql, skipping SED) so we build from the .sql.in above instead, with
 # version-conditional substitutions applied. GNU Make's "overriding recipe"
 # warning for this target is expected.
+#
+# $* is not meaningful for this static (non-pattern) rule, so unlike the
+# pattern rule above this always tags with "VERSIONED FILE!" -- everything
+# built here is, by definition (see EXTENSION_VERSION_FILES above), a
+# version-specific file.
 $(EXTENSION_VERSION_FILES): $(EXTENSION_VERSION_FILES:.sql=.sql.in) pgxntool/safesed
-	(echo @generated@ && cat $< && echo @generated@) | sed -e 's#@generated@#-- GENERATED FILE! DO NOT EDIT! See $<#' > $@.tmp
+	(echo @generated@ && cat $< && echo @generated@) | awk -v src='$<' '\
+		/^@generated@$$/ { print "-- VERSIONED FILE! GENERATED FILE! DO NOT EDIT! See " src; next } \
+		{ print }' > $@.tmp
 	$(_apply_version_seds)
 	mv $@.tmp $@

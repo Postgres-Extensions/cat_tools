@@ -171,7 +171,7 @@ subtest 'empty file produces no findings' => sub {
 };
 
 subtest 'exit code encodes finding count' => sub {
-    my ($rc, $out) = lint_string("-- line1\n-- line2\n");
+    my ($rc, $out) = lint_string("SELECT a,\n");
     is($rc, 11, 'exit 11 = 1 finding + 10');
 };
 
@@ -213,6 +213,26 @@ subtest 'block suppression: disable-block and EXCLUDED CODE alias' => sub {
 
     my ($rc_ex2) = lint_string("/* EXCLUDED CODE: disabled until #123\n$body*/\nSELECT 1;\n");
     is($rc_ex2, 0, 'EXCLUDED CODE with a trailing description still suppresses');
+};
+
+subtest 'region suppression: disable-block/enable-block around real code' => sub {
+    # Unlike the /* */-anchored disable-block above, this pair works on real
+    # (uncommented) code and is closed explicitly rather than by a comment's
+    # own */ -- e.g. for a chunk of borrowed code left deliberately
+    # unreformatted.
+    my ($rc_all, $out_all) = lint_string(
+        "-- sql-lint:disable-block all\nSELECT a,\nSELECT b integer,\n-- sql-lint:enable-block\nSELECT c,\n");
+    isnt($rc_all, 0, 'finding after enable-block still flagged');
+    unlike($out_all, qr/:2:|:3:/, 'no findings inside the disable-block/enable-block region');
+    like($out_all, qr/:5:/, 'finding on line 5 (after enable-block) still reported');
+
+    my (undef, $out_rule) = lint_string(
+        "-- sql-lint:disable-block trailing-comma\nSELECT a integer,\n-- sql-lint:enable-block\n");
+    like($out_rule, qr/prefer-short-type/, 'disabling one rule does not suppress other rules in the region');
+    unlike($out_rule, qr/trailing-comma/, 'disabling one rule does suppress that rule in the region');
+
+    my ($rc_unclosed) = lint_string("-- sql-lint:disable-block all\nSELECT a,\nSELECT b,\n");
+    is($rc_unclosed, 0, 'unclosed disable-block suppresses through EOF');
 };
 
 subtest 'multi-line single-quoted string keeps state across lines' => sub {

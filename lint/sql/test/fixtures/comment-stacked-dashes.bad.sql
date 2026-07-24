@@ -4,4 +4,5 @@
 -- It should use /* */ instead.
 
 -- This is another
--- stacked comment.
+-- stacked comment
+-- spanning three lines.

@@ -158,13 +158,43 @@ sub code_skeleton {
     return $c;
 }
 
+# Mark each line as inside a `sql-lint:disable-block ... enable-block` CODE
+# region — as opposed to the /* */-anchored disable-block above (auto-scoped
+# by the comment's own close, untouched by this). This form works on real
+# code, explicitly closed by `sql-lint:enable-block` (or open to EOF if never
+# closed), so a whole chunk — e.g. borrowed code deliberately left
+# unreformatted — can be silenced without wrapping it in a comment. Nested
+# regions are tracked as a stack, so an inner region closes before an outer
+# one. Stores results directly on each line hashref (region_all / a
+# region_rules set) for is_suppressed() to check.
+sub annotate_region_suppressions {
+    my ($lines) = @_;
+    my @stack;
+    for my $l (@$lines) {
+        if ($l->{text} =~ /sql-lint:disable-block\s+(\S+)/) {
+            push @stack, $1;
+        }
+        for my $r (@stack) {
+            if ($r eq 'all') { $l->{region_all} = 1 }
+            else             { $l->{region_rules}{$r} = 1 }
+        }
+        if ($l->{text} =~ /sql-lint:enable-block\b/ && @stack) {
+            pop @stack;
+        }
+    }
+}
+
 # True if the finding is suppressed by an inline pragma.
 sub is_suppressed {
     my ($lines, $lineno, $rule_id) = @_;
     my $idx = $lineno - 1;
     return 0 if $idx < 0 || $idx > $#$lines;
 
-    my $text = $lines->[$idx]{text};
+    my $l = $lines->[$idx];
+    return 1 if $l->{region_all};
+    return 1 if $l->{region_rules} && $l->{region_rules}{$rule_id};
+
+    my $text = $l->{text};
     # Same-line directive. Matches `sql-lint:disable`, `disable-line`, or
     # `disable-block` (the optional `-line`/`-block` suffix), followed by either
     # this rule's id or the literal `all`. \Q...\E escapes any regex-special
@@ -218,8 +248,10 @@ sub check_stacked_dashes {
     my @out;
     my ($start, $end) = (0, 0);
 
+    # Up to 2 consecutive -- lines is allowed (a short two-line remark reads
+    # fine as --); only 3+ must become a /* */ block.
     my $flush = sub {
-        return unless $start && ($end - $start) >= 1;
+        return unless $start && ($end - $start) >= 2;
         my $n = $end - $start + 1;
         maybe_finding(\@out, $lines, $file, $start, 'comment-stacked-dashes',
             "$n consecutive -- comment lines ($start-$end); use /* */ for multi-line comments");
@@ -501,6 +533,7 @@ my @findings;
 for my $file (@files) {
     next if file_is_generated($file);
     my $lines = scan_file($file);
+    annotate_region_suppressions($lines);
     for my $rule (@rules) {
         push @findings, $rule->{check}->($file, $lines);
     }

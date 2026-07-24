@@ -1,5 +1,5 @@
 CREATE TABLE short_types(
-	id		int		NOT NULL PRIMARY KEY
+	short_types_id	int		NOT NULL PRIMARY KEY
 	, flag		boolean		NOT NULL
 	, name		varchar(100)	NOT NULL
 	, label		text		NOT NULL

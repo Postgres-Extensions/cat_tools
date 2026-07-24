@@ -115,15 +115,20 @@ single-line comments.
 
 ### comment-stacked-dashes
 
-Multi-line comments must use `/* */` syntax, not consecutive `--` lines.
+A run of 3 or more consecutive `--` lines must use `/* */` syntax instead.
+Up to 2 consecutive `--` lines is fine — a short remark reads fine as `--`.
 
 ```sql
 -- Bad: stacked dashes
--- spanning multiple lines
+-- spanning three
+-- or more lines
+
+-- Good: 2 lines is fine
+-- as a short remark
 
 /*
  * Good: block comment
- * spanning multiple lines
+ * for anything longer
  */
 ```
 
@@ -203,6 +208,22 @@ SELECT not_ready_yet(
 ```
 
 Text may follow it (e.g. `/* EXCLUDED CODE — disabled until issue #123`).
+
+### Region suppression (real code, not a comment)
+
+To suppress a chunk of actual code — e.g. borrowed code deliberately left
+unreformatted — wrap it in `disable-block <rule|all>` / `enable-block`
+directives on their own `--` lines. Unlike the `/* */`-anchored form above,
+this pair works outside a comment and is closed explicitly rather than by a
+comment's own `*/` (if never closed, it runs to end of file):
+
+```sql
+-- sql-lint:disable-block all
+SELECT n1.nspname AS fk_schema_name,
+       c1.relname AS fk_table_name
+  FROM pg_catalog.pg_constraint k1
+-- sql-lint:enable-block
+```
 
 ## Adding New Rules
 
