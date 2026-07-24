@@ -45,9 +45,13 @@
 # (skips the `install` prerequisite that only `test` pulls in) and invokes
 # verify-results-pgtap.sh directly (skips the `test` prerequisite that
 # `verify-results` pulls in) -- same underlying work, no pgxntool changes
-# needed. The CALLER is responsible for having already registered pg_tle +
-# cat_tools against `template1` before creating any database this script will
-# use (pg_tle's registration is per-database; `createdb` only inherits it
+# needed. This whole workaround could be simplified away if pgxntool grows an
+# install-skip override (requested upstream:
+# https://github.com/Postgres-Extensions/pgxntool/issues/55) -- revisit this
+# block if/when that lands. The CALLER is responsible for having already
+# registered pg_tle + cat_tools against `template1` before creating any
+# database this script will use (pg_tle's registration is per-database;
+# `createdb` only inherits it
 # because it copies `template1` by default) and for asserting filesystem
 # cleanliness before/after (see bin/assert_fs_clean) -- this flag only stops
 # this script from being the thing that dirties the filesystem itself.

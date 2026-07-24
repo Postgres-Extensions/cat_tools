@@ -285,20 +285,12 @@ jobs:
     steps:
       - name: Start PostgreSQL ${{ matrix.old_pg }}
         run: pg-start ${{ matrix.old_pg }}
-      - name: Recreate old cluster with data checksums enabled
-        run: |
-          pg_ctlcluster ${{ matrix.old_pg }} test stop
-          pg_dropcluster ${{ matrix.old_pg }} test
-          # -p 5432: pg_createcluster assigns the next available port, which
-          # may not be 5432 after pg-start has claimed and released it. Force
-          # 5432 so subsequent psql/createdb calls connect without -p.
-          pg_createcluster -p 5432 ${{ matrix.old_pg }} test -- $INITDB_OPTS
-          pg_ctlcluster ${{ matrix.old_pg }} test start
-          pg_isready -t 30
       - name: Check out the repo
         uses: actions/checkout@v6
       - name: Install rsync
         run: apt-get install -y rsync
+      - name: Recreate old cluster with data checksums enabled
+        run: bin/pg_upgrade_cluster recreate-old ${{ matrix.old_pg }}
       - name: Install cat_tools into old cluster
         run: make install
       - name: Prepare the old cluster (install + bridge + dependency guard)
@@ -320,24 +312,7 @@ jobs:
         # the new version's.
         run: make install PG_CONFIG=/usr/lib/postgresql/${{ matrix.new_pg }}/bin/pg_config
       - name: Stop old cluster, binary pg_upgrade to PostgreSQL ${{ matrix.new_pg }}, start new cluster
-        run: |
-          pg_ctlcluster ${{ matrix.old_pg }} test stop
-          pg_createcluster -p 5432 ${{ matrix.new_pg }} test -- $INITDB_OPTS
-          # PG17+ writes logs to $new_datadir/pg_upgrade_output.d/; older
-          # versions write to CWD. Search both on failure.
-          mkdir -p /tmp/pg_upgrade_logs
-          chown postgres:postgres /tmp/pg_upgrade_logs
-          su -c "cd /tmp/pg_upgrade_logs && /usr/lib/postgresql/${{ matrix.new_pg }}/bin/pg_upgrade \
-            -b /usr/lib/postgresql/${{ matrix.old_pg }}/bin \
-            -B /usr/lib/postgresql/${{ matrix.new_pg }}/bin \
-            -d /var/lib/postgresql/${{ matrix.old_pg }}/test \
-            -D /var/lib/postgresql/${{ matrix.new_pg }}/test \
-            -o '-c config_file=/etc/postgresql/${{ matrix.old_pg }}/test/postgresql.conf' \
-            -O '-c config_file=/etc/postgresql/${{ matrix.new_pg }}/test/postgresql.conf'" postgres \
-            || { find /tmp/pg_upgrade_logs \
-                      /var/lib/postgresql/${{ matrix.new_pg }}/test/pg_upgrade_output.d \
-                      -name '*.log' 2>/dev/null | sort | xargs -r tail -n +1; exit 1; }
-          pg_ctlcluster ${{ matrix.new_pg }} test start
+        run: bin/pg_upgrade_cluster upgrade ${{ matrix.old_pg }} ${{ matrix.new_pg }}
       - name: Update the pg_upgraded extension to the current version
         # Exercises ALTER EXTENSION UPDATE on genuinely pg_upgraded objects (the
         # extension binary pg_upgrade just migrated), running the version-to-version
@@ -705,17 +680,12 @@ jobs:
       # workflow -- same reasoning as pg-tle-test.
       - name: Start PostgreSQL ${{ matrix.old_pg }}
         run: pg-start ${{ matrix.old_pg }}
-      - name: Recreate old cluster with data checksums enabled
-        run: |
-          pg_ctlcluster ${{ matrix.old_pg }} test stop
-          pg_dropcluster ${{ matrix.old_pg }} test
-          pg_createcluster -p 5432 ${{ matrix.old_pg }} test -- $INITDB_OPTS
-          pg_ctlcluster ${{ matrix.old_pg }} test start
-          pg_isready -t 30
       - name: Check out the repo
         uses: actions/checkout@v6
       - name: Install rsync
         run: apt-get install -y rsync
+      - name: Recreate old cluster with data checksums enabled
+        run: bin/pg_upgrade_cluster recreate-old ${{ matrix.old_pg }}
       - name: Snapshot filesystem extension control files (old cluster baseline)
         run: bin/assert_fs_clean snapshot ${{ matrix.old_pg }} /tmp/control_baseline_old.txt
       - name: Build and install pg_tle ${{ env.PGTLE_VERSION }} on the old cluster
@@ -779,26 +749,7 @@ jobs:
       - name: Verify no stray extension control files on the new cluster (pre-upgrade)
         run: bin/assert_fs_clean verify ${{ matrix.new_pg }} /tmp/control_baseline_new.txt
       - name: Stop old cluster, create new cluster, enable pg_tle, binary pg_upgrade, start new cluster
-        run: |
-          pg_ctlcluster ${{ matrix.old_pg }} test stop
-          pg_createcluster -p 5432 ${{ matrix.new_pg }} test -- $INITDB_OPTS
-          echo "shared_preload_libraries = 'pg_tle'" >> /etc/postgresql/${{ matrix.new_pg }}/test/postgresql.conf
-          # PG17+ writes logs to $new_datadir/pg_upgrade_output.d/; older
-          # versions write to CWD. Search both on failure.
-          mkdir -p /tmp/pg_upgrade_logs
-          chown postgres:postgres /tmp/pg_upgrade_logs
-          su -c "cd /tmp/pg_upgrade_logs && /usr/lib/postgresql/${{ matrix.new_pg }}/bin/pg_upgrade \
-            -b /usr/lib/postgresql/${{ matrix.old_pg }}/bin \
-            -B /usr/lib/postgresql/${{ matrix.new_pg }}/bin \
-            -d /var/lib/postgresql/${{ matrix.old_pg }}/test \
-            -D /var/lib/postgresql/${{ matrix.new_pg }}/test \
-            -o '-c config_file=/etc/postgresql/${{ matrix.old_pg }}/test/postgresql.conf' \
-            -O '-c config_file=/etc/postgresql/${{ matrix.new_pg }}/test/postgresql.conf'" postgres \
-            || { find /tmp/pg_upgrade_logs \
-                      /var/lib/postgresql/${{ matrix.new_pg }}/test/pg_upgrade_output.d \
-                      -name '*.log' 2>/dev/null | sort | xargs -r tail -n +1; exit 1; }
-          pg_ctlcluster ${{ matrix.new_pg }} test start
-          pg_isready -t 30
+        run: bin/pg_upgrade_cluster upgrade ${{ matrix.old_pg }} ${{ matrix.new_pg }} "shared_preload_libraries = 'pg_tle'"
       - name: Verify no stray extension control files after binary pg_upgrade
         run: bin/assert_fs_clean verify ${{ matrix.new_pg }} /tmp/control_baseline_new.txt
       - name: Update the pg_upgraded extension to the current version
