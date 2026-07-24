@@ -202,42 +202,37 @@ endef
 # The recipe builds $@.tmp then moves it into place atomically.
 # TODO: refactor the version handling into a function.
 #
-# The boundary/divider @generated@ markers (added by the echo's above, plus
-# any standalone ones already in the source used as visual section dividers)
-# are matched anchored to the WHOLE line -- not a plain substring -- so an
-# @generated@ that coincidentally appears as a trailing annotation on a real
-# code line (there are a few in cat_tools.sql.in) is left untouched instead
-# of being clobbered into generic marker text. A marker line may or may not
-# already carry the "VERSIONED FILE! " prefix (see the copy rule below, which
-# adds it when making a version-specific .sql.in) -- either way resolves to
-# the same trailing "GENERATED FILE! DO NOT EDIT!" text, just with that extra
-# tag kept up front for version files, so it's obvious at a glance that the
-# file is a frozen snapshot that must never be hand-edited.
+# @generated@ is what actually becomes the "-- GENERATED FILE! DO NOT EDIT!"
+# marker below -- it's matched anchored to the START of the line only (not
+# the whole line), so any trailing text after it survives untouched. That's
+# what lets the copy rule below tag a version file's own @generated@ markers
+# with a trailing "VERSIONED FILE!" (see there): this substitution doesn't
+# need to know or care whether that tag is present, it just resolves the
+# @generated@ prefix either way. The start anchor also means an @generated@
+# that coincidentally appears as a trailing annotation on a real code line
+# (there are a few in cat_tools.sql.in) is left untouched instead of being
+# clobbered into generic marker text -- it's never at the start of its line.
 sql/%.sql: sql/%.sql.in pgxntool/safesed
-	(echo @generated@ && cat $< && echo @generated@) | sed \
-		-e 's#^VERSIONED FILE! @generated@$$#-- VERSIONED FILE! GENERATED FILE! DO NOT EDIT! See $<#' \
-		-e 's#^@generated@$$#-- GENERATED FILE! DO NOT EDIT! See $<#' \
-		> $@.tmp
+	(echo @generated@ && cat $< && echo @generated@) | sed -e 's#^@generated@#-- GENERATED FILE! DO NOT EDIT! See $<#' > $@.tmp
 	$(_apply_version_seds)
 	mv $@.tmp $@
 
 # Make the current version's .sql.in by copying the base source, tagging its
-# @generated@ markers as version-specific along the way (see the pattern rule
-# above for how that tag is resolved at .sql build time). Anchored to the
-# WHOLE line for the same reason as above: a coincidental inline @generated@
-# on a real code line must not gain the tag either.
+# @generated@ divider markers as version-specific along the way: the pattern
+# rule above resolves the leading @generated@ regardless, so appending
+# " VERSIONED FILE!" survives into the final marker text, making it obvious
+# at a glance that the built .sql is a frozen snapshot that must never be
+# hand-edited. Anchored to the START of the line so a coincidental inline
+# @generated@ on a real code line (not at the start) is left untouched.
 # (EXTENSION_VERSION_FILES is just sql/cat_tools--<current version>.sql)
 $(EXTENSION_VERSION_FILES:.sql=.sql.in): sql/cat_tools.sql.in cat_tools.control
-	sed -e 's/^@generated@$$/VERSIONED FILE! @generated@/' $< > $@
+	sed -e 's/^@generated@$$/@generated@ VERSIONED FILE!/' $< > $@
 
 # Override control.mk's rule (which builds EXTENSION_VERSION_FILES straight from
 # cat_tools.sql, skipping SED) so we build from the .sql.in above instead, with
 # version-conditional substitutions applied. GNU Make's "overriding recipe"
 # warning for this target is expected.
 $(EXTENSION_VERSION_FILES): $(EXTENSION_VERSION_FILES:.sql=.sql.in) pgxntool/safesed
-	(echo @generated@ && cat $< && echo @generated@) | sed \
-		-e 's#^VERSIONED FILE! @generated@$$#-- VERSIONED FILE! GENERATED FILE! DO NOT EDIT! See $<#' \
-		-e 's#^@generated@$$#-- GENERATED FILE! DO NOT EDIT! See $<#' \
-		> $@.tmp
+	(echo @generated@ && cat $< && echo @generated@) | sed -e 's#^@generated@#-- GENERATED FILE! DO NOT EDIT! See $<#' > $@.tmp
 	$(_apply_version_seds)
 	mv $@.tmp $@
