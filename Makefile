@@ -93,13 +93,15 @@ $(DESTDIR)$(datadir)/extension/cat_tools--0.2.0.sql:
 clean_old_version:
 	pgxn uninstall --unstable 'cat_tools=0.2.0'
 
-# Style linter (see lint/sql/README.md). Scoped to the actively-maintained
-# source rather than the default `sql/ test/` (lint/lint.mk): version-specific
-# install/update scripts under sql/ are frozen once released (SQL file
-# conventions rule 5 in CLAUDE.md — never hand-edited again), so linting them
-# would produce permanent, unfixable findings and make `make lint` unusable
-# as a CI gate. Lint the current source instead; a version file still under
-# active development can be linted directly, e.g.
-# `lint/sql/bin/sql-lint sql/cat_tools--0.3.0.sql.in`.
+# Style linter (see https://github.com/Postgres-Extensions/linter, vendored
+# at .vendor/linter -- lint.mk is the thin local hand-off, see its comment).
+# Scoped to the actively-maintained source rather than the default
+# `sql/ test/`: version-specific install/update scripts under sql/ are
+# frozen once released (SQL file conventions rule 5 in CLAUDE.md — never
+# hand-edited again), so linting them would produce permanent, unfixable
+# findings and make `make lint` unusable as a CI gate. Lint the current
+# source instead; a version file still under active development can be
+# linted directly, e.g.
+# `.vendor/linter/sql/bin/sql-lint sql/cat_tools--0.3.0.sql.in`.
 LINT_TARGETS = sql/cat_tools.sql.in sql/omit_column.sql test/
-include lint/lint.mk
+include lint.mk

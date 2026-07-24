@@ -211,11 +211,15 @@ jobs:
           # (pgxntool marks installcheck `.IGNORE`), so failures would pass silently.
           make verify-results
 
-  # Style linter (see lint/sql/README.md). Runs the linter's own test suite
-  # first (fixtures + scanner edge cases), then lints the actively-maintained
-  # SQL (LINT_TARGETS in the root Makefile). No PostgreSQL needed -- sql-lint
-  # is a standalone Perl script -- so this doesn't use the pgxn-tools
-  # container.
+  # Style linter (https://github.com/Postgres-Extensions/linter, vendored at
+  # .vendor/linter). Deliberately checked out WITHOUT submodules -- `make
+  # lint` is the same command a developer runs locally, and lint.mk
+  # self-initializes the submodule on first use (see its comment). Using the
+  # exact same entry point here is what actually proves that self-init works,
+  # rather than papering over it with a submodules: true checkout. The
+  # linter's own test suite (fixtures + scanner edge cases) is that repo's
+  # own CI's job, not this one's. No PostgreSQL needed -- sql-lint is a
+  # standalone Perl script -- so this doesn't use the pgxn-tools container.
   lint:
     needs: [changes]
     if: needs.changes.outputs.docs_only != 'true'
@@ -224,8 +228,6 @@ jobs:
     steps:
       - name: Check out the repo
         uses: actions/checkout@v6
-      - name: Run the linter's own test suite
-        run: make -C lint test
       - name: Lint SQL
         run: make lint
 

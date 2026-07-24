@@ -1,0 +1,3 @@
+[submodule ".vendor/linter"]
+	path = .vendor/linter
+	url = https://github.com/Postgres-Extensions/linter.git
