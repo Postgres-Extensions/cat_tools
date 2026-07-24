@@ -574,14 +574,15 @@ jobs:
       # pg_tle/non-pg_tle extension installs on one cluster can misbehave.
       - name: Start PostgreSQL ${{ matrix.pg }}
         run: pg-start ${{ matrix.pg }}
-      - name: Snapshot filesystem extension control files (pre-pg_tle baseline)
-        # Whatever ships on disk by default (e.g. contrib) before we install
-        # anything. The later comprehensive check diffs against this, so it
-        # flags ANY extension that lands on disk instead of being registered
-        # via pg_tle -- not just cat_tools -- without hardcoding contrib names.
-        run: find /usr/share/postgresql/${{ matrix.pg }}/extension -maxdepth 1 -name '*.control' | sort > /tmp/control_baseline.txt
       - name: Check out the repo
         uses: actions/checkout@v6
+      - name: Snapshot filesystem extension control files (pre-pg_tle baseline)
+        # Whatever ships on disk by default (e.g. contrib) before we install
+        # anything. bin/assert_fs_clean's later checks diff against this, so
+        # they flag ANY extension that lands on disk instead of being
+        # registered via pg_tle -- not just cat_tools -- without hardcoding
+        # contrib names.
+        run: bin/assert_fs_clean snapshot ${{ matrix.pg }} /tmp/control_baseline.txt
       - name: Install rsync
         run: apt-get install -y rsync
       - name: Build and install pg_tle ${{ env.PGTLE_VERSION }}
@@ -596,10 +597,15 @@ jobs:
           echo "shared_preload_libraries = 'pg_tle'" >> /etc/postgresql/${{ matrix.pg }}/test/postgresql.conf
           pg_ctlcluster ${{ matrix.pg }} test restart
           pg_isready -t 30
-      - name: Create pg_tle extension
-        run: psql -c "CREATE EXTENSION pg_tle"
-      - name: Register cat_tools with pg_tle
-        run: make run-pgtle
+      - name: Register pg_tle + cat_tools against template1
+        # template1, not the ambient default db: pg_tle's registration catalog
+        # is per-database, and `createdb` only inherits it because it copies
+        # template1 by default. Every cat_tools database used below (the
+        # smoke-test db, and whatever bin/test_existing createdb's) is created
+        # AFTER this step specifically so it inherits both registrations.
+        run: |
+          psql -d template1 -c "CREATE EXTENSION pg_tle"
+          PGDATABASE=template1 make run-pgtle
       - name: Verify no stray extension control files landed on the filesystem
         # CRITICAL, and intentionally redundant with the cat_tools-specific
         # check in the next step: a filesystem control file silently wins
@@ -607,17 +613,11 @@ jobs:
         # make this whole job a false pass without ever raising an error.
         # Confirmed hitting exactly this while researching pg_tle version
         # compatibility (a stale filesystem cat_tools install shadowed the
-        # pg_tle-registered one under test). pg_tle.control itself is the
-        # only expected new file since the baseline snapshot.
-        run: |
-          find /usr/share/postgresql/${{ matrix.pg }}/extension -maxdepth 1 -name '*.control' | sort > /tmp/control_after.txt
-          NEW=$(comm -13 /tmp/control_baseline.txt /tmp/control_after.txt | grep -vx '.*/pg_tle\.control' || true)
-          if [ -n "$NEW" ]; then
-            echo "FAIL: unexpected extension control file(s) on disk (everything but pg_tle must be registered via pg_tle, not filesystem-installed):"
-            echo "$NEW"
-            exit 1
-          fi
-      - name: Install cat_tools purely via pg_tle (no filesystem install)
+        # pg_tle-registered one under test). Run again after every step below
+        # that could plausibly write extension files to disk -- never trust a
+        # single check to catch everything.
+        run: bin/assert_fs_clean verify ${{ matrix.pg }} /tmp/control_baseline.txt
+      - name: Install cat_tools purely via pg_tle (fresh install, no filesystem trace)
         # cat_tools is never `make install`ed in this job, so a successful
         # CREATE EXTENSION here can only be resolving through pg_tle's
         # registration, not a control file on disk. Checked explicitly here
@@ -626,16 +626,41 @@ jobs:
         # exclude-list logic has a bug.
         run: |
           test ! -e /usr/share/postgresql/${{ matrix.pg }}/extension/cat_tools.control
-          psql -c "CREATE EXTENSION cat_tools"
+          createdb cat_tools_smoke
+          psql -d cat_tools_smoke -c "CREATE EXTENSION cat_tools"
       - name: Verify cat_tools works when deployed via pg_tle
         run: |
-          INSTALLED=$(psql -tAc "SELECT extversion FROM pg_extension WHERE extname = 'cat_tools'")
+          INSTALLED=$(psql -d cat_tools_smoke -tAc "SELECT extversion FROM pg_extension WHERE extname = 'cat_tools'")
           EXPECTED=$(make -s print-PGXNVERSION 2>/dev/null | sed -n 's/.*set to "\(.*\)"$/\1/p')
           echo "installed=$INSTALLED expected=$EXPECTED"
           if [ -z "$INSTALLED" ] || [ -z "$EXPECTED" ] || [ "$INSTALLED" != "$EXPECTED" ]; then
             echo "FAIL: installed='$INSTALLED' expected='$EXPECTED'"; exit 1
           fi
-          psql -v ON_ERROR_STOP=1 -c "SELECT relname FROM cat_tools.pg_class_v LIMIT 1" > /dev/null
+          psql -d cat_tools_smoke -v ON_ERROR_STOP=1 -c "SELECT relname FROM cat_tools.pg_class_v LIMIT 1" > /dev/null
+      - name: Verify no stray extension control files after the fresh-install smoke test
+        run: bin/assert_fs_clean verify ${{ matrix.pg }} /tmp/control_baseline.txt
+      - name: Install PostgreSQL ${{ matrix.pg }} server dev headers
+        # Needed by `make check-relkind-source`, which bin/test_existing's
+        # run_suite calls -- every other job that reaches that check already
+        # installs this; pg-tle-test didn't need it until now because the
+        # smoke test above never runs the full suite.
+        run: apt-get install -y postgresql-server-dev-${{ matrix.pg }}
+      - name: Test the update path via pg_tle (full pgTAP suite, --use-existing)
+        # Exercises the SAME update path extension-update-test proves for a
+        # filesystem install (0.2.2 -> current), but entirely through pg_tle.
+        # bin/test_existing's update_scenario is UNMODIFIED from the
+        # filesystem case -- only run_suite's internals differ, gated by this
+        # one env var (see the TEST_EXISTING_DEPLOY comment in
+        # bin/test_existing) -- so this reuses the exact same update/upgrade
+        # code the other jobs use instead of duplicating it for pg_tle.
+        run: TEST_EXISTING_DEPLOY=pgtle bin/test_existing update-scenario cat_tools_update 0.2.2
+      - name: Verify no stray extension control files after the pg_tle update test
+        # Runs AFTER the complete update+full-suite flow, not before: the
+        # whole point of pg_tle-mode testing is proving NOTHING touched the
+        # filesystem THROUGHOUT that flow, not merely that the environment
+        # started clean. A check placed before this point could not catch a
+        # regression introduced by anything update-scenario itself does.
+        run: bin/assert_fs_clean verify ${{ matrix.pg }} /tmp/control_baseline.txt
 
   # A single stable check name for use as a required status check in branch
   # protection rules. Matrix jobs produce check names like "🐘 PostgreSQL 14"
