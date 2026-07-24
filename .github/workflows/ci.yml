@@ -211,6 +211,24 @@ jobs:
           # (pgxntool marks installcheck `.IGNORE`), so failures would pass silently.
           make verify-results
 
+  # Style linter (see lint/sql/README.md). Runs the linter's own test suite
+  # first (fixtures + scanner edge cases), then lints the actively-maintained
+  # SQL (LINT_TARGETS in the root Makefile). No PostgreSQL needed -- sql-lint
+  # is a standalone Perl script -- so this doesn't use the pgxn-tools
+  # container.
+  lint:
+    needs: [changes]
+    if: needs.changes.outputs.docs_only != 'true'
+    name: 🧹 SQL Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v6
+      - name: Run the linter's own test suite
+        run: make -C lint test
+      - name: Lint SQL
+        run: make lint
+
   # Proves cat_tools survives a BINARY pg_upgrade (in-place catalog migration to a
   # newer PostgreSQL major), not just an in-place extension update. Each leg is a
   # SINGLE jump: install an old cat_tools on an old cluster, plant a dependency
@@ -555,7 +573,7 @@ jobs:
   # the heavy jobs gated off by the `changes` job on a docs-only push), and
   # fails if any failed or were cancelled.
   all-checks-passed:
-    needs: [changes, test, pg-upgrade-test, pg-upgrade-stepwise, extension-update-test]
+    needs: [changes, test, lint, pg-upgrade-test, pg-upgrade-stepwise, extension-update-test]
     if: always()
     runs-on: ubuntu-latest
     steps:

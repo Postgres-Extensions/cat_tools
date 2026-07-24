@@ -194,7 +194,7 @@ BEGIN
    */
   IF current_user != session_user THEN
     RAISE EXCEPTION USING
-      ERRCODE = '28000'  /* invalid_authorization_specification */
+      ERRCODE = '28000' -- invalid_authorization_specification
       , MESSAGE = 'potential use of SECURITY DEFINER detected'
       , DETAIL = format('current_user is %s, session_user is %s', current_user, session_user)
       , HINT = 'Helper functions must not be called from SECURITY DEFINER context.';
@@ -250,7 +250,7 @@ BEGIN
    */
   IF current_user != session_user THEN
     RAISE EXCEPTION USING
-      ERRCODE = '28000'  /* invalid_authorization_specification */
+      ERRCODE = '28000' -- invalid_authorization_specification
       , MESSAGE = 'potential use of SECURITY DEFINER detected'
       , DETAIL = format('API function %s must not be called from a SECURITY DEFINER function', api_function_name)
       , HINT = 'We detect SECURITY DEFINER context by comparing current_user and session_user, which can cause false positives if SET ROLE is used';
@@ -775,8 +775,10 @@ CREATE TYPE cat_tools.object_type AS ENUM(
   , 'materialized view column'
   , 'composite type column'
   , 'foreign table column'
-  -- pg_constraint
-  -- NOTE: a domain itself is considered to be a type
+  /*
+   * pg_constraint
+   * NOTE: a domain itself is considered to be a type
+   */
   , 'domain constraint', 'table constraint'
   -- pg_proc
   , 'aggregate', 'function'
@@ -936,8 +938,10 @@ SELECT (
     WHEN object_type::text LIKE '% column'
       THEN 'pg_attribute'
     ELSE CASE object_type
-      -- Unusual cases
-      -- s/, \(.\{-}\) -- \(.*\)/  WHEN \1 THEN '\2'/
+      /*
+       * Unusual cases
+       * s/, \(.\{-}\) -- \(.*\)/  WHEN \1 THEN '\2'/
+       */
       WHEN 'default value' THEN 'pg_attrdef'
       WHEN 'large object' THEN 'pg_largeobject'
       WHEN 'operator class' THEN 'pg_opclass'
@@ -1285,38 +1289,38 @@ $$
 -- Borrowed from newsysviews: http://pgfoundry.org/projects/newsysviews/
 CREATE OR REPLACE VIEW cat_tools.pg_all_foreign_keys
 AS
-  SELECT n1.nspname                                   AS fk_schema_name,
-         c1.relname                                   AS fk_table_name,
-         k1.conname                                   AS fk_constraint_name,
-         c1.oid                                       AS fk_table_oid,
-         _cat_tools._pg_sv_column_array(k1.conrelid,k1.conkey)   AS fk_columns,
-         n2.nspname                                   AS pk_schema_name,
-         c2.relname                                   AS pk_table_name,
-         k2.conname                                   AS pk_constraint_name,
-         c2.oid                                       AS pk_table_oid,
-         ci.relname                                   AS pk_index_name,
-         _cat_tools._pg_sv_column_array(k1.confrelid,k1.confkey) AS pk_columns,
-         CASE k1.confmatchtype WHEN 'f' THEN 'FULL'
+  SELECT n1.nspname                                   AS fk_schema_name
+         , c1.relname                                   AS fk_table_name
+         , k1.conname                                   AS fk_constraint_name
+         , c1.oid                                       AS fk_table_oid
+         , _cat_tools._pg_sv_column_array(k1.conrelid,k1.conkey)   AS fk_columns
+         , n2.nspname                                   AS pk_schema_name
+         , c2.relname                                   AS pk_table_name
+         , k2.conname                                   AS pk_constraint_name
+         , c2.oid                                       AS pk_table_oid
+         , ci.relname                                   AS pk_index_name
+         , _cat_tools._pg_sv_column_array(k1.confrelid,k1.confkey) AS pk_columns
+         , CASE k1.confmatchtype WHEN 'f' THEN 'FULL'
                                WHEN 'p' THEN 'PARTIAL'
                                WHEN 'u' THEN 'NONE'
                                else null
-         END AS match_type,
-         CASE k1.confdeltype WHEN 'a' THEN 'NO ACTION'  -- @generated@
+         END AS match_type
+         , CASE k1.confdeltype WHEN 'a' THEN 'NO ACTION'  -- @generated@
                              WHEN 'c' THEN 'CASCADE'
                              WHEN 'd' THEN 'SET DEFAULT'
                              WHEN 'n' THEN 'SET NULL'
                              WHEN 'r' THEN 'RESTRICT'
                              else null
-         END AS on_delete,
-         CASE k1.confupdtype WHEN 'a' THEN 'NO ACTION'
+         END AS on_delete
+         , CASE k1.confupdtype WHEN 'a' THEN 'NO ACTION'
                              WHEN 'c' THEN 'CASCADE'
                              WHEN 'd' THEN 'SET DEFAULT'
                              WHEN 'n' THEN 'SET NULL'
                              WHEN 'r' THEN 'RESTRICT'
                              ELSE NULL
-         END AS on_update,
-         k1.condeferrable AS is_deferrable,             -- @generated@
-         k1.condeferred   AS is_deferred
+         END AS on_update
+         , k1.condeferrable AS is_deferrable             -- @generated@
+         , k1.condeferred   AS is_deferred
     FROM pg_catalog.pg_constraint k1
     JOIN pg_catalog.pg_namespace n1 ON (n1.oid = k1.connamespace)
     JOIN pg_catalog.pg_class c1     ON (c1.oid = k1.conrelid)

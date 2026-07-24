@@ -11,7 +11,7 @@ CREATE TEMP VIEW views AS
 ;
 GRANT SELECT ON views TO public;
 
-/*
+/* EXCLUDED CODE
 CREATE TEMP VIEW func_calls AS
   SELECT * FROM (VALUES
     ('pg_attribute__get'::name, $$'pg_class', 'relname'$$::text)
