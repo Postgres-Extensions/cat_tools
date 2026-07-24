@@ -675,6 +675,148 @@ jobs:
         # regression introduced by anything update-scenario itself does.
         run: bin/assert_fs_clean verify ${{ matrix.pg }} /tmp/control_baseline.txt
 
+  pg-tle-upgrade-test:
+    needs: [changes]
+    if: needs.changes.outputs.docs_only != 'true'
+    strategy:
+      matrix:
+        include:
+          # Mirrors pg-upgrade-test's old_pg=12 legs (the only ones cleanly
+          # within pg_tle 1.5.2's own supported range, PG12-18) so the SAME PG
+          # version jumps are proven for both deployment methods. Unlike
+          # pg-upgrade-test, there is no bridge/old_install complexity here --
+          # pg_tle has no equivalent of the pre-0.2.2 filesystem install-script
+          # issues (those are about SELECT * over catalog columns in old SQL
+          # files, irrelevant to how the extension gets registered).
+          - old_pg: "12"
+            new_pg: "13"
+          - old_pg: "12"
+            new_pg: "18"
+    name: 🧩🔄 pg_tle binary pg_upgrade ${{ matrix.old_pg }} → ${{ matrix.new_pg }}
+    runs-on: ubuntu-latest
+    container: pgxn/pgxn-tools
+    env:
+      # Both clusters must use the same initdb options so pg_upgrade sees
+      # consistent settings (checksums, auth) on old and new clusters.
+      INITDB_OPTS: --data-checksums --auth trust
+      PGTLE_VERSION: "1.5.2"
+    steps:
+      # A dedicated cluster pair, never shared with the other jobs in this
+      # workflow -- same reasoning as pg-tle-test.
+      - name: Start PostgreSQL ${{ matrix.old_pg }}
+        run: pg-start ${{ matrix.old_pg }}
+      - name: Recreate old cluster with data checksums enabled
+        run: |
+          pg_ctlcluster ${{ matrix.old_pg }} test stop
+          pg_dropcluster ${{ matrix.old_pg }} test
+          pg_createcluster -p 5432 ${{ matrix.old_pg }} test -- $INITDB_OPTS
+          pg_ctlcluster ${{ matrix.old_pg }} test start
+          pg_isready -t 30
+      - name: Check out the repo
+        uses: actions/checkout@v6
+      - name: Install rsync
+        run: apt-get install -y rsync
+      - name: Snapshot filesystem extension control files (old cluster baseline)
+        run: bin/assert_fs_clean snapshot ${{ matrix.old_pg }} /tmp/control_baseline_old.txt
+      - name: Build and install pg_tle ${{ env.PGTLE_VERSION }} on the old cluster
+        # flex/bison/libkrb5-dev aren't in the pgxn-tools image; pg_tle's build
+        # needs them (guc-file.l, and clientauth.c includes gssapi.h).
+        run: |
+          apt-get install -y flex bison libkrb5-dev
+          git clone --branch v${{ env.PGTLE_VERSION }} --depth 1 https://github.com/aws/pg_tle.git /tmp/pg_tle_old
+          make -C /tmp/pg_tle_old install
+      - name: Enable pg_tle and restart PostgreSQL ${{ matrix.old_pg }}
+        run: |
+          echo "shared_preload_libraries = 'pg_tle'" >> /etc/postgresql/${{ matrix.old_pg }}/test/postgresql.conf
+          pg_ctlcluster ${{ matrix.old_pg }} test restart
+          pg_isready -t 30
+      - name: Register pg_tle + cat_tools against template1 (old cluster)
+        run: |
+          psql -d template1 -c "CREATE EXTENSION pg_tle"
+          PGDATABASE=template1 make run-pgtle
+      - name: Verify no stray extension control files on the old cluster
+        run: bin/assert_fs_clean verify ${{ matrix.old_pg }} /tmp/control_baseline_old.txt
+      - name: Prepare the old cluster (install via pg_tle + dependency guard)
+        # A fresh 0.2.2 install (no bridge needed -- see pg-upgrade-test's own
+        # comment on why its old_pg>=11 legs don't need one), created via
+        # pg_tle only, then the same dependency guard bin/test_existing's
+        # other subcommands rely on to prove existing-mode never silently
+        # drops+reinstalls the extension.
+        run: |
+          test ! -e /usr/share/postgresql/${{ matrix.old_pg }}/extension/cat_tools.control
+          createdb cat_tools_tle_upgrade
+          psql -d cat_tools_tle_upgrade -c "CREATE EXTENSION cat_tools VERSION '0.2.2'"
+          bin/test_existing plant-guard cat_tools_tle_upgrade
+      - name: Install PostgreSQL ${{ matrix.new_pg }}
+        run: apt-get install -y postgresql-${{ matrix.new_pg }} postgresql-server-dev-${{ matrix.new_pg }}
+      - name: Install pgtap on the new cluster (test harness dependency)
+        # Must happen BEFORE the new-cluster baseline snapshot below, same
+        # reasoning as pg-tle-test's "Install pgtap" step: pgTAP is a
+        # filesystem-installed dependency of the test harness, unrelated to
+        # cat_tools's own pg_tle-only deployment story, so it needs to be part
+        # of the accepted starting state rather than flagged as contamination.
+        # PATH is set explicitly (not just relying on apt's update-alternatives
+        # switch from installing postgresql-${{ matrix.new_pg }} above) since
+        # `pgxn install` resolves pg_config via PATH, not via a passed-through
+        # PG_CONFIG make variable.
+        run: PATH=/usr/lib/postgresql/${{ matrix.new_pg }}/bin:$PATH make pgtap
+      - name: Snapshot filesystem extension control files (new cluster baseline)
+        run: bin/assert_fs_clean snapshot ${{ matrix.new_pg }} /tmp/control_baseline_new.txt
+      - name: Build and install pg_tle ${{ env.PGTLE_VERSION }} on the new cluster
+        # Only pg_tle's OWN framework is needed on the new binary tree -- NOT
+        # cat_tools. Binary pg_upgrade's schema-only restore recreates each
+        # object individually (binary_upgrade_create_empty_extension), and
+        # pg_tle's own catalog tables (holding cat_tools's registered SQL) are
+        # carried over as ordinary heap data during the physical copy phase --
+        # no re-registration needed on the new side. A SEPARATE clone
+        # (pg_tle_new, not pg_tle_old rebuilt) avoids installing a .so still
+        # compiled against the old cluster's PostgreSQL headers: pg_tle has C
+        # code, unlike cat_tools, so switching PG_CONFIG on an already-built
+        # tree without a fresh build would risk installing the wrong binary.
+        run: |
+          git clone --branch v${{ env.PGTLE_VERSION }} --depth 1 https://github.com/aws/pg_tle.git /tmp/pg_tle_new
+          make -C /tmp/pg_tle_new install PG_CONFIG=/usr/lib/postgresql/${{ matrix.new_pg }}/bin/pg_config
+      - name: Verify no stray extension control files on the new cluster (pre-upgrade)
+        run: bin/assert_fs_clean verify ${{ matrix.new_pg }} /tmp/control_baseline_new.txt
+      - name: Stop old cluster, create new cluster, enable pg_tle, binary pg_upgrade, start new cluster
+        run: |
+          pg_ctlcluster ${{ matrix.old_pg }} test stop
+          pg_createcluster -p 5432 ${{ matrix.new_pg }} test -- $INITDB_OPTS
+          echo "shared_preload_libraries = 'pg_tle'" >> /etc/postgresql/${{ matrix.new_pg }}/test/postgresql.conf
+          # PG17+ writes logs to $new_datadir/pg_upgrade_output.d/; older
+          # versions write to CWD. Search both on failure.
+          mkdir -p /tmp/pg_upgrade_logs
+          chown postgres:postgres /tmp/pg_upgrade_logs
+          su -c "cd /tmp/pg_upgrade_logs && /usr/lib/postgresql/${{ matrix.new_pg }}/bin/pg_upgrade \
+            -b /usr/lib/postgresql/${{ matrix.old_pg }}/bin \
+            -B /usr/lib/postgresql/${{ matrix.new_pg }}/bin \
+            -d /var/lib/postgresql/${{ matrix.old_pg }}/test \
+            -D /var/lib/postgresql/${{ matrix.new_pg }}/test \
+            -o '-c config_file=/etc/postgresql/${{ matrix.old_pg }}/test/postgresql.conf' \
+            -O '-c config_file=/etc/postgresql/${{ matrix.new_pg }}/test/postgresql.conf'" postgres \
+            || { find /tmp/pg_upgrade_logs \
+                      /var/lib/postgresql/${{ matrix.new_pg }}/test/pg_upgrade_output.d \
+                      -name '*.log' 2>/dev/null | sort | xargs -r tail -n +1; exit 1; }
+          pg_ctlcluster ${{ matrix.new_pg }} test start
+          pg_isready -t 30
+      - name: Verify no stray extension control files after binary pg_upgrade
+        run: bin/assert_fs_clean verify ${{ matrix.new_pg }} /tmp/control_baseline_new.txt
+      - name: Update the pg_upgraded extension to the current version
+        # Exercises ALTER EXTENSION UPDATE on genuinely pg_upgraded objects
+        # registered via pg_tle. update_ext() is pure psql (no `make` calls),
+        # so it's identical regardless of deployment method -- no pg_tle-mode
+        # flag needed here, only for run-suite below.
+        run: bin/test_existing update cat_tools_tle_upgrade
+      - name: Run the suite against the pg_upgraded database via pg_tle (existing mode)
+        run: TEST_EXISTING_DEPLOY=pgtle bin/test_existing run-suite cat_tools_tle_upgrade
+      - name: Verify no stray extension control files after the pg_tle upgrade+update+suite run
+        # CRITICAL: must run AFTER the complete flow, not before -- same
+        # principle as pg-tle-test's final checkpoint. Proves nothing touched
+        # the filesystem across binary pg_upgrade, the extension update, AND
+        # the full pgTAP suite run, not merely that the environment started
+        # clean.
+        run: bin/assert_fs_clean verify ${{ matrix.new_pg }} /tmp/control_baseline_new.txt
+
   # A single stable check name for use as a required status check in branch
   # protection rules. Matrix jobs produce check names like "🐘 PostgreSQL 14"
   # which would all need to be listed individually and updated whenever the
@@ -682,7 +824,7 @@ jobs:
   # the heavy jobs gated off by the `changes` job on a docs-only push), and
   # fails if any failed or were cancelled.
   all-checks-passed:
-    needs: [changes, test, pg-upgrade-test, pg-upgrade-stepwise, extension-update-test, pg-tle-test]
+    needs: [changes, test, pg-upgrade-test, pg-upgrade-stepwise, extension-update-test, pg-tle-test, pg-tle-upgrade-test]
     if: always()
     runs-on: ubuntu-latest
     steps:
