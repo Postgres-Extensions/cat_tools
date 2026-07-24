@@ -574,6 +574,12 @@ jobs:
       # pg_tle/non-pg_tle extension installs on one cluster can misbehave.
       - name: Start PostgreSQL ${{ matrix.pg }}
         run: pg-start ${{ matrix.pg }}
+      - name: Snapshot filesystem extension control files (pre-pg_tle baseline)
+        # Whatever ships on disk by default (e.g. contrib) before we install
+        # anything. The later comprehensive check diffs against this, so it
+        # flags ANY extension that lands on disk instead of being registered
+        # via pg_tle -- not just cat_tools -- without hardcoding contrib names.
+        run: find /usr/share/postgresql/${{ matrix.pg }}/extension -maxdepth 1 -name '*.control' | sort > /tmp/control_baseline.txt
       - name: Check out the repo
         uses: actions/checkout@v6
       - name: Install rsync
@@ -594,10 +600,30 @@ jobs:
         run: psql -c "CREATE EXTENSION pg_tle"
       - name: Register cat_tools with pg_tle
         run: make run-pgtle
+      - name: Verify no stray extension control files landed on the filesystem
+        # CRITICAL, and intentionally redundant with the cat_tools-specific
+        # check in the next step: a filesystem control file silently wins
+        # over a pg_tle-registered extension of the same name, which would
+        # make this whole job a false pass without ever raising an error.
+        # Confirmed hitting exactly this while researching pg_tle version
+        # compatibility (a stale filesystem cat_tools install shadowed the
+        # pg_tle-registered one under test). pg_tle.control itself is the
+        # only expected new file since the baseline snapshot.
+        run: |
+          find /usr/share/postgresql/${{ matrix.pg }}/extension -maxdepth 1 -name '*.control' | sort > /tmp/control_after.txt
+          NEW=$(comm -13 /tmp/control_baseline.txt /tmp/control_after.txt | grep -vx '.*/pg_tle\.control' || true)
+          if [ -n "$NEW" ]; then
+            echo "FAIL: unexpected extension control file(s) on disk (everything but pg_tle must be registered via pg_tle, not filesystem-installed):"
+            echo "$NEW"
+            exit 1
+          fi
       - name: Install cat_tools purely via pg_tle (no filesystem install)
         # cat_tools is never `make install`ed in this job, so a successful
         # CREATE EXTENSION here can only be resolving through pg_tle's
-        # registration, not a control file on disk.
+        # registration, not a control file on disk. Checked explicitly here
+        # too (not just via the comprehensive check above) as a guard
+        # specifically for the extension under test, in case that check's
+        # exclude-list logic has a bug.
         run: |
           test ! -e /usr/share/postgresql/${{ matrix.pg }}/extension/cat_tools.control
           psql -c "CREATE EXTENSION cat_tools"
