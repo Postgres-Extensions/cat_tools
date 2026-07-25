@@ -290,7 +290,7 @@ jobs:
       - name: Install rsync
         run: apt-get install -y rsync
       - name: Recreate old cluster with data checksums enabled
-        run: bin/pg_upgrade_cluster recreate-old ${{ matrix.old_pg }}
+        run: .github/scripts/pg_upgrade_cluster recreate-old ${{ matrix.old_pg }}
       - name: Install cat_tools into old cluster
         run: make install
       - name: Prepare the old cluster (install + bridge + dependency guard)
@@ -312,7 +312,7 @@ jobs:
         # the new version's.
         run: make install PG_CONFIG=/usr/lib/postgresql/${{ matrix.new_pg }}/bin/pg_config
       - name: Stop old cluster, binary pg_upgrade to PostgreSQL ${{ matrix.new_pg }}, start new cluster
-        run: bin/pg_upgrade_cluster upgrade ${{ matrix.old_pg }} ${{ matrix.new_pg }}
+        run: .github/scripts/pg_upgrade_cluster upgrade ${{ matrix.old_pg }} ${{ matrix.new_pg }}
       - name: Update the pg_upgraded extension to the current version
         # Exercises ALTER EXTENSION UPDATE on genuinely pg_upgraded objects (the
         # extension binary pg_upgrade just migrated), running the version-to-version
@@ -685,7 +685,7 @@ jobs:
       - name: Install rsync
         run: apt-get install -y rsync
       - name: Recreate old cluster with data checksums enabled
-        run: bin/pg_upgrade_cluster recreate-old ${{ matrix.old_pg }}
+        run: .github/scripts/pg_upgrade_cluster recreate-old ${{ matrix.old_pg }}
       - name: Snapshot filesystem extension control files (old cluster baseline)
         run: bin/assert_fs_clean snapshot ${{ matrix.old_pg }} /tmp/control_baseline_old.txt
       - name: Build and install pg_tle ${{ env.PGTLE_VERSION }} on the old cluster
@@ -749,7 +749,7 @@ jobs:
       - name: Verify no stray extension control files on the new cluster (pre-upgrade)
         run: bin/assert_fs_clean verify ${{ matrix.new_pg }} /tmp/control_baseline_new.txt
       - name: Stop old cluster, create new cluster, enable pg_tle, binary pg_upgrade, start new cluster
-        run: bin/pg_upgrade_cluster upgrade ${{ matrix.old_pg }} ${{ matrix.new_pg }} "shared_preload_libraries = 'pg_tle'"
+        run: .github/scripts/pg_upgrade_cluster upgrade ${{ matrix.old_pg }} ${{ matrix.new_pg }} "shared_preload_libraries = 'pg_tle'"
       - name: Verify no stray extension control files after binary pg_upgrade
         run: bin/assert_fs_clean verify ${{ matrix.new_pg }} /tmp/control_baseline_new.txt
       - name: Update the pg_upgraded extension to the current version

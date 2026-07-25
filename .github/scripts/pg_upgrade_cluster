@@ -6,7 +6,12 @@
 # the flow has nothing extension-specific about it, so it lives here once
 # instead of being duplicated near-verbatim in both jobs.
 #
-# USAGE: bin/pg_upgrade_cluster <subcommand> [args]
+# Lives under .github/, not bin/: unlike bin/test_existing (which a developer
+# can run locally against a scratch database), this is CI-mechanics-only --
+# pg_ctlcluster/pg_createcluster/pg_upgrade against the pgxn-tools image's
+# "test" cluster convention isn't a locally-runnable workflow.
+#
+# USAGE: .github/scripts/pg_upgrade_cluster <subcommand> [args]
 #
 #   recreate-old PG_VERSION
 #       pg-start's default "test" cluster doesn't have data checksums
@@ -71,7 +76,7 @@ upgrade() {
 }
 
 usage() {
-  echo "usage: bin/pg_upgrade_cluster <subcommand> [args]" >&2
+  echo "usage: .github/scripts/pg_upgrade_cluster <subcommand> [args]" >&2
   echo "  recreate-old PG_VERSION" >&2
   echo "  upgrade OLD_PG NEW_PG [EXTRA_NEW_CONF]" >&2
   exit 2
