@@ -20,8 +20,20 @@ jobs:
   changes:
     name: 🔍 Detect changes & derive PG matrix
     runs-on: ubuntu-latest
+    permissions:
+      # Needed only by "Find the last commit where real code changed" below,
+      # to query the Actions API for a past run's conclusion/URL.
+      actions: read
     outputs:
       docs_only: ${{ steps.diff.outputs.docs_only }}
+      # Set when docs_only is true: whether there's a real "last tested" commit
+      # to report at all (false), or this entire PR/push chain has never
+      # touched anything but docs (true, docs_only_pr) -- see the "Find the
+      # last commit..." step below for how these are derived.
+      docs_only_pr: ${{ steps.last_tested.outputs.docs_only_pr }}
+      last_tested_sha: ${{ steps.last_tested.outputs.last_tested_sha }}
+      last_tested_conclusion: ${{ steps.last_tested.outputs.last_tested_conclusion }}
+      last_tested_url: ${{ steps.last_tested.outputs.last_tested_url }}
       # Derived PG-major lists (see the "Derive ..." step for their meaning).
       supported_pg: ${{ steps.pg.outputs.supported_pg }}
       update_pg: ${{ steps.pg.outputs.update_pg }}
@@ -84,6 +96,78 @@ jobs:
           echo "changed files:"
           echo "$CHANGED"
           echo "docs_only=$DOCS_ONLY" >> "$GITHUB_OUTPUT"
+
+      - name: Find the last commit where real code changed
+        # This push is docs-only, so the heavy jobs below are about to skip --
+        # meaning THIS run's checks don't cover the code currently on this
+        # branch. Someone reviewing before merge needs to know whether that
+        # code was actually fully tested somewhere, and whether it was green.
+        # Walk backward from HEAD (bounded by the PR's base, or a generous
+        # depth cap for a direct push) to the newest commit whose OWN diff
+        # from its parent touched something other than docs -- every commit
+        # strictly after that one only changed docs, so that commit's CI run
+        # is still the authoritative test of the code on this branch now.
+        if: steps.diff.outputs.docs_only == 'true'
+        id: last_tested
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          HEAD_SHA=$(git rev-parse HEAD)
+          if [ -n "$PR_BASE_SHA" ] && ! [[ "$PR_BASE_SHA" =~ ^0+$ ]]; then
+            BOUNDARY=$(git merge-base "$PR_BASE_SHA" "$HEAD_SHA")
+          else
+            # Not a PR (e.g. a direct push to master): no PR base to bound
+            # the walk against, so cap it at a generous depth instead of
+            # walking arbitrarily far into history.
+            BOUNDARY=$(git rev-list --max-count=1 --skip=100 "$HEAD_SHA" 2>/dev/null || echo "$HEAD_SHA")
+          fi
+
+          commit="$HEAD_SHA"
+          last_code_commit=""
+          while [ "$commit" != "$BOUNDARY" ]; do
+            parent=$(git rev-parse "$commit^" 2>/dev/null) || break
+            changed=$(git diff --name-only "$parent" "$commit")
+            all_docs=true
+            while IFS= read -r f; do
+              [ -z "$f" ] && continue
+              if ! [[ "$f" =~ \.(md|asc)$ ]]; then all_docs=false; break; fi
+            done <<< "$changed"
+            if [ "$all_docs" = true ]; then
+              commit="$parent"
+            else
+              last_code_commit="$commit"
+              break
+            fi
+          done
+
+          if [ -z "$last_code_commit" ]; then
+            # Reached the PR's own base (or the depth cap) without ever
+            # finding a commit that changed code: this whole PR/push chain
+            # is docs-only, so there is no "last tested" run to point to.
+            echo "docs_only_pr=true" >> "$GITHUB_OUTPUT"
+            echo "This entire PR/push contains only documentation changes -- no code testing applies."
+            exit 0
+          fi
+
+          echo "docs_only_pr=false" >> "$GITHUB_OUTPUT"
+          echo "last_tested_sha=$last_code_commit" >> "$GITHUB_OUTPUT"
+          echo "last code-changing commit: $last_code_commit"
+
+          # Find that commit's most recent completed run of this same "CI"
+          # workflow (there can be other workflows -- e.g. Claude Code Review
+          # -- triggered on the same SHA, hence the name filter).
+          RUN_JSON=$(gh api "repos/$REPO/actions/runs?head_sha=$last_code_commit&status=completed" --jq \
+            '[.workflow_runs[] | select(.name == "CI")] | sort_by(.run_started_at) | last // empty' 2>/dev/null || echo "")
+          if [ -z "$RUN_JSON" ] || [ "$RUN_JSON" = "null" ]; then
+            echo "last_tested_conclusion=unknown" >> "$GITHUB_OUTPUT"
+            echo "last_tested_url=" >> "$GITHUB_OUTPUT"
+            echo "No completed CI run found for $last_code_commit"
+          else
+            echo "last_tested_conclusion=$(jq -r '.conclusion' <<<"$RUN_JSON")" >> "$GITHUB_OUTPUT"
+            echo "last_tested_url=$(jq -r '.html_url' <<<"$RUN_JSON")" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Derive the supported-PostgreSQL-major lists
         id: pg
@@ -804,5 +888,27 @@ jobs:
           if [[ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
             echo "One or more jobs failed or were cancelled"
             exit 1
+          fi
+      - name: Summarize what this push actually tested
+        # This job's own checks report "skipped" for every heavy job on a
+        # docs-only push -- true for THIS push, but easy to mistake for "never
+        # tested" when just glancing at the PR's Checks tab. Make it explicit
+        # what's actually being vouched for. Reporting only -- does not affect
+        # pass/fail; see the "Check all jobs passed" step above for that gate.
+        run: |
+          if [ "${{ needs.changes.outputs.docs_only }}" != "true" ]; then
+            echo "✅ This push's own CI run tested the code (not a docs-only push)." >> "$GITHUB_STEP_SUMMARY"
+          elif [ "${{ needs.changes.outputs.docs_only_pr }}" = "true" ]; then
+            echo "📄 This entire PR/push contains only documentation changes -- no code testing applies." >> "$GITHUB_STEP_SUMMARY"
+          else
+            SHA="${{ needs.changes.outputs.last_tested_sha }}"
+            CONCLUSION="${{ needs.changes.outputs.last_tested_conclusion }}"
+            URL="${{ needs.changes.outputs.last_tested_url }}"
+            if [ "$CONCLUSION" = "success" ]; then ICON="✅"; else ICON="⚠️"; fi
+            if [ -n "$URL" ]; then
+              echo "$ICON This push only changed docs. The code was last fully tested at \`${SHA:0:7}\` -- [$CONCLUSION]($URL)" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "⚠️ This push only changed docs, and no completed CI run was found for the last code-changing commit (\`${SHA:0:7}\`) -- verify manually." >> "$GITHUB_STEP_SUMMARY"
+            fi
           fi
 # vi: expandtab ts=2 sw=2
