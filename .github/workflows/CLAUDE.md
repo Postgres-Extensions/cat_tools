@@ -1,4 +1,4 @@
-# CI Instructions for cat_tools
+# CI Instructions
 
 ## Reducing CI wall-clock time
 
