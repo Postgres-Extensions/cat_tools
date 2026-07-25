@@ -41,6 +41,16 @@ from:
   workflow's triggers are ever changed, re-verify that scoping is preserved; an unscoped
   `push:` trigger would double-run CI on every PR-branch commit.
 
+## Docs-only pushes and "what was actually tested"
+
+A docs-only push makes the heavy jobs report "skipped" for THAT commit, which is correct (the
+code didn't change) but easy to misread on the PR's Checks tab as "never tested." The `changes`
+job's "Find the last commit where real code changed" step handles this: it walks backward
+through history to the newest commit that actually changed code, looks up that commit's CI run,
+and `all-checks-passed` reports it (link + green/red) in its step summary -- or explicitly notes
+when the entire PR has never touched anything but docs. Don't assume "skipped" means "untested"
+without checking that summary first.
+
 ## Where CI-only shell logic lives
 
 `.github/scripts/` holds shell scripts that are **only** meaningful inside a CI job (e.g.
