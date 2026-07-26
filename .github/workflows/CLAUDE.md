@@ -51,6 +51,15 @@ and `all-checks-passed` reports it (link + green/red) in its step summary -- or 
 when the entire PR has never touched anything but docs. Don't assume "skipped" means "untested"
 without checking that summary first.
 
+## `pull_request_target` workflows can't be tested from the PR that changes them
+
+GitHub always executes the workflow FILE for a `pull_request_target` event from the BASE
+branch (master), never the PR's own version -- a deliberate security control so a fork PR can't
+alter its own reviewer's permissions/behavior. `claude-code-review.yml` runs this way. Practical
+consequence: a PR that changes that file (e.g. adjusting its `permissions:` block) cannot prove
+the change took effect by watching that PR's own `claude-review` check -- it's still running
+master's old version. Verify changes to that file only after merging to master, on the next PR.
+
 ## Where CI-only shell logic lives
 
 `.github/scripts/` holds shell scripts that are **only** meaningful inside a CI job (e.g.
