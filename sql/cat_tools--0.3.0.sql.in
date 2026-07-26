@@ -1282,7 +1282,7 @@ $$
 @generated@ VERSIONED FILE!
 
 -- Borrowed from newsysviews: http://pgfoundry.org/projects/newsysviews/
--- sql-lint:disable-block all: copied verbatim from upstream, do not reformat
+-- sql-lint:disable-block all: copied verbatim from newsysviews, do not reformat
 CREATE OR REPLACE VIEW cat_tools.pg_all_foreign_keys
 AS
   SELECT n1.nspname                                   AS fk_schema_name,
