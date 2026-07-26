@@ -203,7 +203,7 @@ endef
 # TODO: refactor the version handling into a function.
 #
 # @generated@ is what actually becomes the "-- GENERATED FILE! DO NOT EDIT!"
-# marker below -- it's matched anchored to the START of the line only (not
+# marker below; it's matched anchored to the START of the line only (not
 # the whole line), so any trailing text after it survives untouched. That's
 # what lets the copy rule below tag a version file's own @generated@ markers
 # with a trailing "VERSIONED FILE!" (see there): this substitution doesn't
