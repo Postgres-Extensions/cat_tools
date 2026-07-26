@@ -113,8 +113,21 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          # actions/checkout defaults to checking out an EPHEMERAL MERGE
+          # COMMIT for pull_request events (refs/pull/N/merge), not the PR's
+          # real head commit -- `git rev-parse HEAD` would return that merge
+          # commit's SHA, and walking `^` from it follows the wrong (base
+          # branch) first parent, landing on an unrelated commit entirely
+          # (confirmed hitting exactly this in real CI). Use the actual PR
+          # head SHA directly instead, same event-type split already used in
+          # "Compute per-push changed files" above.
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          HEAD_SHA=$(git rev-parse HEAD)
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            HEAD_SHA="$PR_HEAD_SHA"
+          else
+            HEAD_SHA="${{ github.sha }}"
+          fi
           if [ -n "$PR_BASE_SHA" ] && ! [[ "$PR_BASE_SHA" =~ ^0+$ ]]; then
             BOUNDARY=$(git merge-base "$PR_BASE_SHA" "$HEAD_SHA")
           else
