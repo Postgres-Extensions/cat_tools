@@ -77,7 +77,14 @@ DATA += $(upgrade_scripts_out)
 DATA := $(sort $(DATA))
 
 all: sql/cat_tools.sql $(versioned_out)
-installcheck: sql/cat_tools.sql $(versioned_out)
+# `install` is an explicit prerequisite here (not just a fellow TEST_DEPS entry)
+# because pgxntool 2.2.0's check-stale-expected also depends directly on
+# installcheck and sits earlier in TEST_DEPS than test-build/install: Make
+# resolves that edge first, running installcheck (and installing nothing)
+# before TEST_DEPS's own install/installcheck pair ever runs, on a tree where
+# nothing is installed yet (e.g. fresh CI). See
+# https://github.com/Postgres-Extensions/pgxntool/issues/79.
+installcheck: install sql/cat_tools.sql $(versioned_out)
 EXTRA_CLEAN += sql/cat_tools.sql $(versioned_out)
 
 #
