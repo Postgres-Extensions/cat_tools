@@ -12,15 +12,6 @@ CREATE TEMP VIEW views AS
 GRANT SELECT ON views TO public;
 
 /*
-CREATE TEMP VIEW func_calls AS
-  SELECT * FROM (VALUES
-    ('pg_attribute__get'::name, $$'pg_class', 'relname'$$::text)
-  ) v(fname, args)
-;
-GRANT SELECT ON func_calls TO public;
-*/
-
-/*
  * The pg_depends tests are problematic, because bag_eq creates temp objects,
  * which then do not show up in pg_dep or the view. So we need to capture what
  * things look like before actually running the test. The same problem exists

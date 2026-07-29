@@ -194,7 +194,7 @@ BEGIN
    */
   IF current_user != session_user THEN
     RAISE EXCEPTION USING
-      ERRCODE = '28000'  /* invalid_authorization_specification */
+      ERRCODE = '28000' -- invalid_authorization_specification
       , MESSAGE = 'potential use of SECURITY DEFINER detected'
       , DETAIL = format('current_user is %s, session_user is %s', current_user, session_user)
       , HINT = 'Helper functions must not be called from SECURITY DEFINER context.';
@@ -250,7 +250,7 @@ BEGIN
    */
   IF current_user != session_user THEN
     RAISE EXCEPTION USING
-      ERRCODE = '28000'  /* invalid_authorization_specification */
+      ERRCODE = '28000' -- invalid_authorization_specification
       , MESSAGE = 'potential use of SECURITY DEFINER detected'
       , DETAIL = format('API function %s must not be called from a SECURITY DEFINER function', api_function_name)
       , HINT = 'We detect SECURITY DEFINER context by comparing current_user and session_user, which can cause false positives if SET ROLE is used';
@@ -937,7 +937,6 @@ SELECT (
       THEN 'pg_attribute'
     ELSE CASE object_type
       -- Unusual cases
-      -- s/, \(.\{-}\) -- \(.*\)/  WHEN \1 THEN '\2'/
       WHEN 'default value' THEN 'pg_attrdef'
       WHEN 'large object' THEN 'pg_largeobject'
       WHEN 'operator class' THEN 'pg_opclass'
@@ -1283,6 +1282,7 @@ $$
 @generated@
 
 -- Borrowed from newsysviews: http://pgfoundry.org/projects/newsysviews/
+-- sql-lint:disable-block all: copied verbatim from newsysviews, do not reformat
 CREATE OR REPLACE VIEW cat_tools.pg_all_foreign_keys
 AS
   SELECT n1.nspname                                   AS fk_schema_name,
@@ -1348,6 +1348,7 @@ AS
      AND k1.contype = 'f'
      AND _cat_tools._pg_sv_table_accessible(n1.oid, c1.oid)
 ;
+-- sql-lint:enable-block
 GRANT SELECT ON cat_tools.pg_all_foreign_keys TO cat_tools__usage;
 
 @generated@

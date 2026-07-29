@@ -308,6 +308,26 @@ jobs:
           # (pgxntool marks installcheck `.IGNORE`), so failures would pass silently.
           make verify-results
 
+  # Style linter (https://github.com/Postgres-Extensions/linter, vendored at
+  # .vendor/linter). Deliberately checked out WITHOUT submodules -- `make
+  # lint` is the same command a developer runs locally, and lint.mk
+  # self-initializes the submodule on first use (see its comment). Using the
+  # exact same entry point here is what actually proves that self-init works,
+  # rather than papering over it with a submodules: true checkout. The
+  # linter's own test suite (fixtures + scanner edge cases) is that repo's
+  # own CI's job, not this one's. No PostgreSQL needed -- sql-lint is a
+  # standalone Perl script -- so this doesn't use the pgxn-tools container.
+  lint:
+    needs: [changes]
+    if: needs.changes.outputs.docs_only != 'true'
+    name: 🧹 SQL Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v6
+      - name: Lint SQL
+        run: make lint
+
   # Proves cat_tools survives a BINARY pg_upgrade (in-place catalog migration to a
   # newer PostgreSQL major), not just an in-place extension update. Each leg is a
   # SINGLE jump: install an old cat_tools on an old cluster, plant a dependency
@@ -872,7 +892,7 @@ jobs:
   # the heavy jobs gated off by the `changes` job on a docs-only push), and
   # fails if any failed or were cancelled.
   all-checks-passed:
-    needs: [changes, test, pg-upgrade-test, pg-upgrade-stepwise, extension-update-test, pg-tle-test, pg-tle-upgrade-test]
+    needs: [changes, test, lint, pg-upgrade-test, pg-upgrade-stepwise, extension-update-test, pg-tle-test, pg-tle-upgrade-test]
     if: always()
     runs-on: ubuntu-latest
     steps:
