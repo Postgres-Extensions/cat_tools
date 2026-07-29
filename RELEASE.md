@@ -24,7 +24,7 @@ what that version actually shipped.
       flag — it likely means `default_version` in `cat_tools.control` was left pointing
       at that real (non-`stable`) version after release, and a later source edit to
       `sql/cat_tools.sql.in` silently regenerated — and corrupted — the committed file
-      via `sql.mk`'s current-version rule (`$(EXTENSION_VERSION_FILES:.sql=.sql.in):
+      via `sql.mk`'s current-version rule (`$(EXTENSION__CURRENT_VERSION__FILES:.sql=.sql.in):
       sql/cat_tools.sql.in cat_tools.control`, which `cp`s the base source over it).
       Investigate before proceeding.
 - [ ] **Known exception, not necessarily a corruption:** a version file whose
