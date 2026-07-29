@@ -7,13 +7,12 @@ This file documents pg_tle version boundaries that affect pgxntool's pg_tle supp
 ### 1.0.0-1.4.0
 - **pg_tle versions:** 1.0.0 through 1.3.x
 - **PostgreSQL support:** 11-17
-- **API:** No `pgtle.uninstall_extension()` function, no schema parameter
 - **Features:** Basic extension management, custom data types, authentication hooks
 
 ### 1.4.0-1.5.0
 - **pg_tle versions:** 1.4.0 through 1.4.x
 - **PostgreSQL support:** 11-17
-- **API:** Added `pgtle.uninstall_extension()` function, no schema parameter
+- **API:** Added alignment/storage parameters to `pgtle.create_base_type()`
 - **Features:** Custom alignment/storage, enhanced warnings
 
 ### 1.5.0+
@@ -24,10 +23,10 @@ This file documents pg_tle version boundaries that affect pgxntool's pg_tle supp
 
 ## Key API Changes by Version
 
-**1.4.0:** Added `pgtle.uninstall_extension()`
-- Versions before 1.4.0 cannot uninstall extensions
+**1.4.0:** Added alignment/storage parameters to `pgtle.create_base_type()`
 
-**1.5.0:** Changed `pgtle.install_extension()` signature
+**1.5.0**
+- Changed `pgtle.install_extension()` signature
 - Added required `schema` parameter
 - Dropped PostgreSQL 11 support
 

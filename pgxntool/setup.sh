@@ -87,4 +87,4 @@ rmdir src
 
 If everything looks good then
 
-git commit -am 'Add pgxntool (https://github.com/decibel/pgxntool/tree/release)'"
+git commit -am 'Add pgxntool (https://github.com/Postgres-Extensions/pgxntool/tree/release)'"

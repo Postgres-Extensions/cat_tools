@@ -72,7 +72,7 @@ test-update:
 # therefore does NOT include base.mk itself -- only sql.mk. sql.mk documents the
 # GNU Make two-phase (parse vs. recipe) hazards involved (e.g.
 # https://github.com/Postgres-Extensions/cat_tools/issues/28) and relies on
-# base.mk/control.mk/PGXS vars (EXTENSION_VERSION_FILES, PG_CONFIG, MAJORVER,
+# base.mk/control.mk/PGXS vars (EXTENSION__CURRENT_VERSION__FILES, PG_CONFIG, MAJORVER,
 # datadir, ...). The PGXNTOOL_ENABLE_TEST_INSTALL / TEST_LOAD_SOURCE vars above
 # are set before this include so base.mk (pulled in by sql.mk) sees them.
 include sql.mk
