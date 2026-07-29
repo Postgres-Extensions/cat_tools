@@ -20,8 +20,20 @@ jobs:
   changes:
     name: 🔍 Detect changes & derive PG matrix
     runs-on: ubuntu-latest
+    permissions:
+      # Needed only by "Find the last commit where real code changed" below,
+      # to query the Actions API for a past run's conclusion/URL.
+      actions: read
     outputs:
       docs_only: ${{ steps.diff.outputs.docs_only }}
+      # Set when docs_only is true: whether there's a real "last tested" commit
+      # to report at all (false), or this entire PR/push chain has never
+      # touched anything but docs (true, docs_only_pr) -- see the "Find the
+      # last commit..." step below for how these are derived.
+      docs_only_pr: ${{ steps.last_tested.outputs.docs_only_pr }}
+      last_tested_sha: ${{ steps.last_tested.outputs.last_tested_sha }}
+      last_tested_conclusion: ${{ steps.last_tested.outputs.last_tested_conclusion }}
+      last_tested_url: ${{ steps.last_tested.outputs.last_tested_url }}
       # Derived PG-major lists (see the "Derive ..." step for their meaning).
       supported_pg: ${{ steps.pg.outputs.supported_pg }}
       update_pg: ${{ steps.pg.outputs.update_pg }}
@@ -84,6 +96,91 @@ jobs:
           echo "changed files:"
           echo "$CHANGED"
           echo "docs_only=$DOCS_ONLY" >> "$GITHUB_OUTPUT"
+
+      - name: Find the last commit where real code changed
+        # This push is docs-only, so the heavy jobs below are about to skip --
+        # meaning THIS run's checks don't cover the code currently on this
+        # branch. Someone reviewing before merge needs to know whether that
+        # code was actually fully tested somewhere, and whether it was green.
+        # Walk backward from HEAD (bounded by the PR's base, or a generous
+        # depth cap for a direct push) to the newest commit whose OWN diff
+        # from its parent touched something other than docs -- every commit
+        # strictly after that one only changed docs, so that commit's CI run
+        # is still the authoritative test of the code on this branch now.
+        if: steps.diff.outputs.docs_only == 'true'
+        id: last_tested
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          # actions/checkout defaults to checking out an EPHEMERAL MERGE
+          # COMMIT for pull_request events (refs/pull/N/merge), not the PR's
+          # real head commit -- `git rev-parse HEAD` would return that merge
+          # commit's SHA, and walking `^` from it follows the wrong (base
+          # branch) first parent, landing on an unrelated commit entirely
+          # (confirmed hitting exactly this in real CI). Use the actual PR
+          # head SHA directly instead, same event-type split already used in
+          # "Compute per-push changed files" above.
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            HEAD_SHA="$PR_HEAD_SHA"
+          else
+            HEAD_SHA="${{ github.sha }}"
+          fi
+          if [ -n "$PR_BASE_SHA" ] && ! [[ "$PR_BASE_SHA" =~ ^0+$ ]]; then
+            BOUNDARY=$(git merge-base "$PR_BASE_SHA" "$HEAD_SHA")
+          else
+            # Not a PR (e.g. a direct push to master): no PR base to bound
+            # the walk against, so cap it at a generous depth instead of
+            # walking arbitrarily far into history.
+            BOUNDARY=$(git rev-list --max-count=1 --skip=100 "$HEAD_SHA" 2>/dev/null || echo "$HEAD_SHA")
+          fi
+
+          commit="$HEAD_SHA"
+          last_code_commit=""
+          while [ "$commit" != "$BOUNDARY" ]; do
+            parent=$(git rev-parse "$commit^" 2>/dev/null) || break
+            changed=$(git diff --name-only "$parent" "$commit")
+            all_docs=true
+            while IFS= read -r f; do
+              [ -z "$f" ] && continue
+              if ! [[ "$f" =~ \.(md|asc)$ ]]; then all_docs=false; break; fi
+            done <<< "$changed"
+            if [ "$all_docs" = true ]; then
+              commit="$parent"
+            else
+              last_code_commit="$commit"
+              break
+            fi
+          done
+
+          if [ -z "$last_code_commit" ]; then
+            # Reached the PR's own base (or the depth cap) without ever
+            # finding a commit that changed code: this whole PR/push chain
+            # is docs-only, so there is no "last tested" run to point to.
+            echo "docs_only_pr=true" >> "$GITHUB_OUTPUT"
+            echo "This entire PR/push contains only documentation changes -- no code testing applies."
+            exit 0
+          fi
+
+          echo "docs_only_pr=false" >> "$GITHUB_OUTPUT"
+          echo "last_tested_sha=$last_code_commit" >> "$GITHUB_OUTPUT"
+          echo "last code-changing commit: $last_code_commit"
+
+          # Find that commit's most recent completed run of this same "CI"
+          # workflow (there can be other workflows -- e.g. Claude Code Review
+          # -- triggered on the same SHA, hence the name filter).
+          RUN_JSON=$(gh api "repos/$REPO/actions/runs?head_sha=$last_code_commit&status=completed" --jq \
+            '[.workflow_runs[] | select(.name == "CI")] | sort_by(.run_started_at) | last // empty' 2>/dev/null || echo "")
+          if [ -z "$RUN_JSON" ] || [ "$RUN_JSON" = "null" ]; then
+            echo "last_tested_conclusion=unknown" >> "$GITHUB_OUTPUT"
+            echo "last_tested_url=" >> "$GITHUB_OUTPUT"
+            echo "No completed CI run found for $last_code_commit"
+          else
+            echo "last_tested_conclusion=$(jq -r '.conclusion' <<<"$RUN_JSON")" >> "$GITHUB_OUTPUT"
+            echo "last_tested_url=$(jq -r '.html_url' <<<"$RUN_JSON")" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Derive the supported-PostgreSQL-major lists
         id: pg
@@ -285,20 +382,12 @@ jobs:
     steps:
       - name: Start PostgreSQL ${{ matrix.old_pg }}
         run: pg-start ${{ matrix.old_pg }}
-      - name: Recreate old cluster with data checksums enabled
-        run: |
-          pg_ctlcluster ${{ matrix.old_pg }} test stop
-          pg_dropcluster ${{ matrix.old_pg }} test
-          # -p 5432: pg_createcluster assigns the next available port, which
-          # may not be 5432 after pg-start has claimed and released it. Force
-          # 5432 so subsequent psql/createdb calls connect without -p.
-          pg_createcluster -p 5432 ${{ matrix.old_pg }} test -- $INITDB_OPTS
-          pg_ctlcluster ${{ matrix.old_pg }} test start
-          pg_isready -t 30
       - name: Check out the repo
         uses: actions/checkout@v6
       - name: Install rsync
         run: apt-get install -y rsync
+      - name: Recreate old cluster with data checksums enabled
+        run: .github/scripts/pg_upgrade_cluster recreate-old ${{ matrix.old_pg }}
       - name: Install cat_tools into old cluster
         run: make install
       - name: Prepare the old cluster (install + bridge + dependency guard)
@@ -320,24 +409,7 @@ jobs:
         # the new version's.
         run: make install PG_CONFIG=/usr/lib/postgresql/${{ matrix.new_pg }}/bin/pg_config
       - name: Stop old cluster, binary pg_upgrade to PostgreSQL ${{ matrix.new_pg }}, start new cluster
-        run: |
-          pg_ctlcluster ${{ matrix.old_pg }} test stop
-          pg_createcluster -p 5432 ${{ matrix.new_pg }} test -- $INITDB_OPTS
-          # PG17+ writes logs to $new_datadir/pg_upgrade_output.d/; older
-          # versions write to CWD. Search both on failure.
-          mkdir -p /tmp/pg_upgrade_logs
-          chown postgres:postgres /tmp/pg_upgrade_logs
-          su -c "cd /tmp/pg_upgrade_logs && /usr/lib/postgresql/${{ matrix.new_pg }}/bin/pg_upgrade \
-            -b /usr/lib/postgresql/${{ matrix.old_pg }}/bin \
-            -B /usr/lib/postgresql/${{ matrix.new_pg }}/bin \
-            -d /var/lib/postgresql/${{ matrix.old_pg }}/test \
-            -D /var/lib/postgresql/${{ matrix.new_pg }}/test \
-            -o '-c config_file=/etc/postgresql/${{ matrix.old_pg }}/test/postgresql.conf' \
-            -O '-c config_file=/etc/postgresql/${{ matrix.new_pg }}/test/postgresql.conf'" postgres \
-            || { find /tmp/pg_upgrade_logs \
-                      /var/lib/postgresql/${{ matrix.new_pg }}/test/pg_upgrade_output.d \
-                      -name '*.log' 2>/dev/null | sort | xargs -r tail -n +1; exit 1; }
-          pg_ctlcluster ${{ matrix.new_pg }} test start
+        run: .github/scripts/pg_upgrade_cluster upgrade ${{ matrix.old_pg }} ${{ matrix.new_pg }}
       - name: Update the pg_upgraded extension to the current version
         # Exercises ALTER EXTENSION UPDATE on genuinely pg_upgraded objects (the
         # extension binary pg_upgrade just migrated), running the version-to-version
@@ -548,6 +620,251 @@ jobs:
         if: matrix.pg != '10'
         run: bin/test_existing update-scenario cat_tools_update 0.2.2
 
+  pg-tle-test:
+    needs: [changes]
+    if: needs.changes.outputs.docs_only != 'true'
+    strategy:
+      matrix:
+        # Current-supported majors, from the single source in the changes job
+        # (see its "Derive ..." step) -- same list the `test` job uses. This
+        # currently happens to line up with pg_tle 1.5.2's own supported range
+        # (12-18, see pgxntool/pgtle_versions.md) too, but that's a coincidence:
+        # if either range moves independently in the future, re-check they
+        # still overlap before assuming this job covers what it claims to.
+        # 1.5.2 itself is what AWS RDS for PostgreSQL 17 currently ships
+        # (RDS PG17.7+, our primary deployment target -- see
+        # https://docs.aws.amazon.com/AmazonRDS/latest/PostgreSQLReleaseNotes/postgresql-versions.html).
+        pg: ${{ fromJSON(needs.changes.outputs.supported_pg) }}
+    name: 🧩 pg_tle ${{ matrix.pg }}
+    runs-on: ubuntu-latest
+    container: pgxn/pgxn-tools
+    env:
+      PGTLE_VERSION: "1.5.2"
+    steps:
+      # A dedicated cluster, never shared with the other jobs in this
+      # workflow: pg_tle requires shared_preload_libraries and mixing
+      # pg_tle/non-pg_tle extension installs on one cluster can misbehave.
+      - name: Start PostgreSQL ${{ matrix.pg }}
+        run: pg-start ${{ matrix.pg }}
+      - name: Check out the repo
+        uses: actions/checkout@v6
+      - name: Install rsync
+        run: apt-get install -y rsync
+      - name: Install pgtap (test harness dependency)
+        # pgTAP is a filesystem-installed dependency of the TEST HARNESS, not
+        # part of what this job proves is pg_tle-only -- it's not being
+        # deployed via pg_tle here, and never will be. `bin/test_existing`'s
+        # pg_tle-mode run_suite calls `make testdeps`, which would otherwise
+        # filesystem-install pgTAP for the first time partway through the job
+        # and trip the contamination checks below (confirmed happening in a
+        # real CI run). Installing it explicitly here, before the baseline
+        # snapshot, makes it part of the accepted starting state -- like any
+        # other extension already on disk -- instead of needing a hardcoded
+        # exclude-by-name rule that would erode the whole point of diffing
+        # against a baseline.
+        run: make pgtap
+      - name: Snapshot filesystem extension control files (pre-pg_tle baseline)
+        # Whatever ships on disk by default (e.g. contrib, and now pgtap)
+        # before we install pg_tle. bin/assert_fs_clean's later checks diff
+        # against this, so they flag ANY extension that lands on disk instead
+        # of being registered via pg_tle -- not just cat_tools -- without
+        # hardcoding contrib/pgtap names.
+        run: bin/assert_fs_clean snapshot ${{ matrix.pg }} /tmp/control_baseline.txt
+      - name: Build and install pg_tle ${{ env.PGTLE_VERSION }}
+        # flex/bison/libkrb5-dev aren't in the pgxn-tools image; pg_tle's build
+        # needs them (guc-file.l, and clientauth.c includes gssapi.h).
+        run: |
+          apt-get install -y flex bison libkrb5-dev
+          git clone --branch v${{ env.PGTLE_VERSION }} --depth 1 https://github.com/aws/pg_tle.git /tmp/pg_tle
+          make -C /tmp/pg_tle install
+      - name: Enable pg_tle and restart PostgreSQL ${{ matrix.pg }}
+        run: |
+          echo "shared_preload_libraries = 'pg_tle'" >> /etc/postgresql/${{ matrix.pg }}/test/postgresql.conf
+          pg_ctlcluster ${{ matrix.pg }} test restart
+          pg_isready -t 30
+      - name: Register pg_tle + cat_tools against template1
+        # template1, not the ambient default db: pg_tle's registration catalog
+        # is per-database, and `createdb` only inherits it because it copies
+        # template1 by default. Every cat_tools database used below (the
+        # smoke-test db, and whatever bin/test_existing createdb's) is created
+        # AFTER this step specifically so it inherits both registrations.
+        run: |
+          psql -d template1 -c "CREATE EXTENSION pg_tle"
+          PGDATABASE=template1 make run-pgtle
+      - name: Verify no stray extension control files landed on the filesystem
+        # CRITICAL, and intentionally redundant with the cat_tools-specific
+        # check in the next step: a filesystem control file silently wins
+        # over a pg_tle-registered extension of the same name, which would
+        # make this whole job a false pass without ever raising an error.
+        # Confirmed hitting exactly this while researching pg_tle version
+        # compatibility (a stale filesystem cat_tools install shadowed the
+        # pg_tle-registered one under test). Run again after every step below
+        # that could plausibly write extension files to disk -- never trust a
+        # single check to catch everything.
+        run: bin/assert_fs_clean verify ${{ matrix.pg }} /tmp/control_baseline.txt
+      - name: Install cat_tools purely via pg_tle (fresh install, no filesystem trace)
+        # cat_tools is never `make install`ed in this job, so a successful
+        # CREATE EXTENSION here can only be resolving through pg_tle's
+        # registration, not a control file on disk. Checked explicitly here
+        # too (not just via the comprehensive check above) as a guard
+        # specifically for the extension under test, in case that check's
+        # exclude-list logic has a bug.
+        run: |
+          test ! -e /usr/share/postgresql/${{ matrix.pg }}/extension/cat_tools.control
+          createdb cat_tools_smoke
+          psql -d cat_tools_smoke -c "CREATE EXTENSION cat_tools"
+      - name: Verify cat_tools works when deployed via pg_tle
+        run: |
+          INSTALLED=$(psql -d cat_tools_smoke -tAc "SELECT extversion FROM pg_extension WHERE extname = 'cat_tools'")
+          EXPECTED=$(make -s print-PGXNVERSION 2>/dev/null | sed -n 's/.*set to "\(.*\)"$/\1/p')
+          echo "installed=$INSTALLED expected=$EXPECTED"
+          if [ -z "$INSTALLED" ] || [ -z "$EXPECTED" ] || [ "$INSTALLED" != "$EXPECTED" ]; then
+            echo "FAIL: installed='$INSTALLED' expected='$EXPECTED'"; exit 1
+          fi
+          psql -d cat_tools_smoke -v ON_ERROR_STOP=1 -c "SELECT relname FROM cat_tools.pg_class_v LIMIT 1" > /dev/null
+      - name: Verify no stray extension control files after the fresh-install smoke test
+        run: bin/assert_fs_clean verify ${{ matrix.pg }} /tmp/control_baseline.txt
+      - name: Install PostgreSQL ${{ matrix.pg }} server dev headers
+        # Needed by `make check-relkind-source`, which bin/test_existing's
+        # run_suite calls -- every other job that reaches that check already
+        # installs this; pg-tle-test didn't need it until now because the
+        # smoke test above never runs the full suite.
+        run: apt-get install -y postgresql-server-dev-${{ matrix.pg }}
+      - name: Test the update path via pg_tle (full pgTAP suite, --use-existing)
+        # Exercises the SAME update path extension-update-test proves for a
+        # filesystem install (0.2.2 -> current), but entirely through pg_tle.
+        # bin/test_existing's update_scenario is UNMODIFIED from the
+        # filesystem case -- only run_suite's internals differ, gated by this
+        # one env var (see the TEST_EXISTING_DEPLOY comment in
+        # bin/test_existing) -- so this reuses the exact same update/upgrade
+        # code the other jobs use instead of duplicating it for pg_tle.
+        run: TEST_EXISTING_DEPLOY=pgtle bin/test_existing update-scenario cat_tools_update 0.2.2
+      - name: Verify no stray extension control files after the pg_tle update test
+        # Runs AFTER the complete update+full-suite flow, not before: the
+        # whole point of pg_tle-mode testing is proving NOTHING touched the
+        # filesystem THROUGHOUT that flow, not merely that the environment
+        # started clean. A check placed before this point could not catch a
+        # regression introduced by anything update-scenario itself does.
+        run: bin/assert_fs_clean verify ${{ matrix.pg }} /tmp/control_baseline.txt
+
+  pg-tle-upgrade-test:
+    needs: [changes]
+    if: needs.changes.outputs.docs_only != 'true'
+    strategy:
+      matrix:
+        include:
+          # Mirrors pg-upgrade-test's old_pg=12 legs (the only ones cleanly
+          # within pg_tle 1.5.2's own supported range, PG12-18) so the SAME PG
+          # version jumps are proven for both deployment methods. Unlike
+          # pg-upgrade-test, there is no bridge/old_install complexity here --
+          # pg_tle has no equivalent of the pre-0.2.2 filesystem install-script
+          # issues (those are about SELECT * over catalog columns in old SQL
+          # files, irrelevant to how the extension gets registered).
+          - old_pg: "12"
+            new_pg: "13"
+          - old_pg: "12"
+            new_pg: "18"
+    name: 🧩🔄 pg_tle binary pg_upgrade ${{ matrix.old_pg }} → ${{ matrix.new_pg }}
+    runs-on: ubuntu-latest
+    container: pgxn/pgxn-tools
+    env:
+      # Both clusters must use the same initdb options so pg_upgrade sees
+      # consistent settings (checksums, auth) on old and new clusters.
+      INITDB_OPTS: --data-checksums --auth trust
+      PGTLE_VERSION: "1.5.2"
+    steps:
+      # A dedicated cluster pair, never shared with the other jobs in this
+      # workflow -- same reasoning as pg-tle-test.
+      - name: Start PostgreSQL ${{ matrix.old_pg }}
+        run: pg-start ${{ matrix.old_pg }}
+      - name: Check out the repo
+        uses: actions/checkout@v6
+      - name: Install rsync
+        run: apt-get install -y rsync
+      - name: Recreate old cluster with data checksums enabled
+        run: .github/scripts/pg_upgrade_cluster recreate-old ${{ matrix.old_pg }}
+      - name: Snapshot filesystem extension control files (old cluster baseline)
+        run: bin/assert_fs_clean snapshot ${{ matrix.old_pg }} /tmp/control_baseline_old.txt
+      - name: Build and install pg_tle ${{ env.PGTLE_VERSION }} on the old cluster
+        # flex/bison/libkrb5-dev aren't in the pgxn-tools image; pg_tle's build
+        # needs them (guc-file.l, and clientauth.c includes gssapi.h).
+        run: |
+          apt-get install -y flex bison libkrb5-dev
+          git clone --branch v${{ env.PGTLE_VERSION }} --depth 1 https://github.com/aws/pg_tle.git /tmp/pg_tle_old
+          make -C /tmp/pg_tle_old install
+      - name: Enable pg_tle and restart PostgreSQL ${{ matrix.old_pg }}
+        run: |
+          echo "shared_preload_libraries = 'pg_tle'" >> /etc/postgresql/${{ matrix.old_pg }}/test/postgresql.conf
+          pg_ctlcluster ${{ matrix.old_pg }} test restart
+          pg_isready -t 30
+      - name: Register pg_tle + cat_tools against template1 (old cluster)
+        run: |
+          psql -d template1 -c "CREATE EXTENSION pg_tle"
+          PGDATABASE=template1 make run-pgtle
+      - name: Verify no stray extension control files on the old cluster
+        run: bin/assert_fs_clean verify ${{ matrix.old_pg }} /tmp/control_baseline_old.txt
+      - name: Prepare the old cluster (install via pg_tle + dependency guard)
+        # A fresh 0.2.2 install (no bridge needed -- see pg-upgrade-test's own
+        # comment on why its old_pg>=11 legs don't need one), created via
+        # pg_tle only, then the same dependency guard bin/test_existing's
+        # other subcommands rely on to prove existing-mode never silently
+        # drops+reinstalls the extension.
+        run: |
+          test ! -e /usr/share/postgresql/${{ matrix.old_pg }}/extension/cat_tools.control
+          createdb cat_tools_tle_upgrade
+          psql -d cat_tools_tle_upgrade -c "CREATE EXTENSION cat_tools VERSION '0.2.2'"
+          bin/test_existing plant-guard cat_tools_tle_upgrade
+      - name: Install PostgreSQL ${{ matrix.new_pg }}
+        run: apt-get install -y postgresql-${{ matrix.new_pg }} postgresql-server-dev-${{ matrix.new_pg }}
+      - name: Install pgtap on the new cluster (test harness dependency)
+        # Must happen BEFORE the new-cluster baseline snapshot below, same
+        # reasoning as pg-tle-test's "Install pgtap" step: pgTAP is a
+        # filesystem-installed dependency of the test harness, unrelated to
+        # cat_tools's own pg_tle-only deployment story, so it needs to be part
+        # of the accepted starting state rather than flagged as contamination.
+        # PATH is set explicitly (not just relying on apt's update-alternatives
+        # switch from installing postgresql-${{ matrix.new_pg }} above) since
+        # `pgxn install` resolves pg_config via PATH, not via a passed-through
+        # PG_CONFIG make variable.
+        run: PATH=/usr/lib/postgresql/${{ matrix.new_pg }}/bin:$PATH make pgtap
+      - name: Snapshot filesystem extension control files (new cluster baseline)
+        run: bin/assert_fs_clean snapshot ${{ matrix.new_pg }} /tmp/control_baseline_new.txt
+      - name: Build and install pg_tle ${{ env.PGTLE_VERSION }} on the new cluster
+        # Only pg_tle's OWN framework is needed on the new binary tree -- NOT
+        # cat_tools. Binary pg_upgrade's schema-only restore recreates each
+        # object individually (binary_upgrade_create_empty_extension), and
+        # pg_tle's own catalog tables (holding cat_tools's registered SQL) are
+        # carried over as ordinary heap data during the physical copy phase --
+        # no re-registration needed on the new side. A SEPARATE clone
+        # (pg_tle_new, not pg_tle_old rebuilt) avoids installing a .so still
+        # compiled against the old cluster's PostgreSQL headers: pg_tle has C
+        # code, unlike cat_tools, so switching PG_CONFIG on an already-built
+        # tree without a fresh build would risk installing the wrong binary.
+        run: |
+          git clone --branch v${{ env.PGTLE_VERSION }} --depth 1 https://github.com/aws/pg_tle.git /tmp/pg_tle_new
+          make -C /tmp/pg_tle_new install PG_CONFIG=/usr/lib/postgresql/${{ matrix.new_pg }}/bin/pg_config
+      - name: Verify no stray extension control files on the new cluster (pre-upgrade)
+        run: bin/assert_fs_clean verify ${{ matrix.new_pg }} /tmp/control_baseline_new.txt
+      - name: Stop old cluster, create new cluster, enable pg_tle, binary pg_upgrade, start new cluster
+        run: .github/scripts/pg_upgrade_cluster upgrade ${{ matrix.old_pg }} ${{ matrix.new_pg }} "shared_preload_libraries = 'pg_tle'"
+      - name: Verify no stray extension control files after binary pg_upgrade
+        run: bin/assert_fs_clean verify ${{ matrix.new_pg }} /tmp/control_baseline_new.txt
+      - name: Update the pg_upgraded extension to the current version
+        # Exercises ALTER EXTENSION UPDATE on genuinely pg_upgraded objects
+        # registered via pg_tle. update_ext() is pure psql (no `make` calls),
+        # so it's identical regardless of deployment method -- no pg_tle-mode
+        # flag needed here, only for run-suite below.
+        run: bin/test_existing update cat_tools_tle_upgrade
+      - name: Run the suite against the pg_upgraded database via pg_tle (existing mode)
+        run: TEST_EXISTING_DEPLOY=pgtle bin/test_existing run-suite cat_tools_tle_upgrade
+      - name: Verify no stray extension control files after the pg_tle upgrade+update+suite run
+        # CRITICAL: must run AFTER the complete flow, not before -- same
+        # principle as pg-tle-test's final checkpoint. Proves nothing touched
+        # the filesystem across binary pg_upgrade, the extension update, AND
+        # the full pgTAP suite run, not merely that the environment started
+        # clean.
+        run: bin/assert_fs_clean verify ${{ matrix.new_pg }} /tmp/control_baseline_new.txt
+
   # A single stable check name for use as a required status check in branch
   # protection rules. Matrix jobs produce check names like "🐘 PostgreSQL 14"
   # which would all need to be listed individually and updated whenever the
@@ -555,7 +872,7 @@ jobs:
   # the heavy jobs gated off by the `changes` job on a docs-only push), and
   # fails if any failed or were cancelled.
   all-checks-passed:
-    needs: [changes, test, pg-upgrade-test, pg-upgrade-stepwise, extension-update-test]
+    needs: [changes, test, pg-upgrade-test, pg-upgrade-stepwise, extension-update-test, pg-tle-test, pg-tle-upgrade-test]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -584,5 +901,27 @@ jobs:
           if [[ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
             echo "One or more jobs failed or were cancelled"
             exit 1
+          fi
+      - name: Summarize what this push actually tested
+        # This job's own checks report "skipped" for every heavy job on a
+        # docs-only push -- true for THIS push, but easy to mistake for "never
+        # tested" when just glancing at the PR's Checks tab. Make it explicit
+        # what's actually being vouched for. Reporting only -- does not affect
+        # pass/fail; see the "Check all jobs passed" step above for that gate.
+        run: |
+          if [ "${{ needs.changes.outputs.docs_only }}" != "true" ]; then
+            echo "✅ This push's own CI run tested the code (not a docs-only push)." >> "$GITHUB_STEP_SUMMARY"
+          elif [ "${{ needs.changes.outputs.docs_only_pr }}" = "true" ]; then
+            echo "📄 This entire PR/push contains only documentation changes -- no code testing applies." >> "$GITHUB_STEP_SUMMARY"
+          else
+            SHA="${{ needs.changes.outputs.last_tested_sha }}"
+            CONCLUSION="${{ needs.changes.outputs.last_tested_conclusion }}"
+            URL="${{ needs.changes.outputs.last_tested_url }}"
+            if [ "$CONCLUSION" = "success" ]; then ICON="✅"; else ICON="⚠️"; fi
+            if [ -n "$URL" ]; then
+              echo "$ICON This push only changed docs. The code was last fully tested at \`${SHA:0:7}\` -- [$CONCLUSION]($URL)" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "⚠️ This push only changed docs, and no completed CI run was found for the last code-changing commit (\`${SHA:0:7}\`) -- verify manually." >> "$GITHUB_STEP_SUMMARY"
+            fi
           fi
 # vi: expandtab ts=2 sw=2

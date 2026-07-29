@@ -35,6 +35,27 @@
 #
 # Run `bin/test_existing` with no subcommand to print usage.
 #
+# TEST_EXISTING_DEPLOY=pgtle (env var, checked by run_suite): the extension
+# under test was deployed via pg_tle, not the filesystem, and must NEVER be
+# filesystem-installed by anything this script does. `make test` unconditionally
+# depends on `install` (pgxntool/base.mk's TEST_DEPS), and `make verify-results`
+# in turn depends on `test` -- so calling either would install cat_tools to disk
+# as a side effect, even though the database itself was never touched via the
+# filesystem. In this mode run_suite calls `testdeps`+`installcheck` directly
+# (skips the `install` prerequisite that only `test` pulls in) and invokes
+# verify-results-pgtap.sh directly (skips the `test` prerequisite that
+# `verify-results` pulls in) -- same underlying work, no pgxntool changes
+# needed. This whole workaround could be simplified away if pgxntool grows an
+# install-skip override (requested upstream:
+# https://github.com/Postgres-Extensions/pgxntool/issues/55) -- revisit this
+# block if/when that lands. The CALLER is responsible for having already
+# registered pg_tle + cat_tools against `template1` before creating any
+# database this script will use (pg_tle's registration is per-database;
+# `createdb` only inherits it
+# because it copies `template1` by default) and for asserting filesystem
+# cleanliness before/after (see bin/assert_fs_clean) -- this flag only stops
+# this script from being the thing that dirties the filesystem itself.
+#
 # Why the dependency guard: "existing" mode must run the suite against the ACTUAL
 # upgraded/updated objects. If anything silently dropped + reinstalled the
 # extension, the suite would test a FRESH install and hide a regression. As
@@ -223,8 +244,21 @@ run_suite() {
   #      the SAME existing-mode overrides or it would re-run FRESH (against a new
   #      regression DB) instead of verifying THIS existing database.
   local existing_args="TEST_LOAD_SOURCE=existing CONTRIB_TESTDB=$db EXTRA_REGRESS_OPTS=--use-existing PGXNTOOL_ENABLE_TEST_BUILD=no"
-  make test $existing_args
-  make verify-results $existing_args
+  if [ "${TEST_EXISTING_DEPLOY:-}" = pgtle ]; then
+    # pg_tle mode (see the TEST_EXISTING_DEPLOY comment at the top of this
+    # file): `test` and `verify-results` each unconditionally pull in
+    # `install`, so run the same underlying work directly instead --
+    # `testdeps`+`installcheck` (neither depends on `install`), then the
+    # pgtap-mode verify-results script directly (skips its `test` prerequisite).
+    make testdeps $existing_args
+    make installcheck $existing_args
+    local testout
+    testout=$(make -s print-TESTOUT 2>/dev/null | sed -n 's/.*set to "\(.*\)"$/\1/p')
+    pgxntool/verify-results-pgtap.sh "$testout"
+  else
+    make test $existing_args
+    make verify-results $existing_args
+  fi
   # Post-suite guard assertion: a CASCADE drop+reinstall during the run would
   # have removed the guard view, meaning the suite tested a fresh install, not $db.
   guard_present "$db" \

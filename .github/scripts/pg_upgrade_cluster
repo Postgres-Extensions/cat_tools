@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+#
+# pg_upgrade_cluster - Shared binary pg_upgrade mechanics for CI. Used by BOTH
+# pg-upgrade-test (filesystem-installed cat_tools) and pg-tle-upgrade-test
+# (pg_tle-registered cat_tools) in .github/workflows/ci.yml -- this part of
+# the flow has nothing extension-specific about it, so it lives here once
+# instead of being duplicated near-verbatim in both jobs.
+#
+# Lives under .github/, not bin/: unlike bin/test_existing (which a developer
+# can run locally against a scratch database), this is CI-mechanics-only --
+# pg_ctlcluster/pg_createcluster/pg_upgrade against the pgxn-tools image's
+# "test" cluster convention isn't a locally-runnable workflow.
+#
+# USAGE: .github/scripts/pg_upgrade_cluster <subcommand> [args]
+#
+#   recreate-old PG_VERSION
+#       pg-start's default "test" cluster doesn't have data checksums
+#       enabled, but binary pg_upgrade requires the old and new clusters to
+#       have MATCHING checksum/auth settings (see $INITDB_OPTS below) --
+#       stop, drop, and recreate the "test" cluster for PG_VERSION with them,
+#       then start it and wait for readiness.
+#
+#   upgrade OLD_PG NEW_PG [EXTRA_NEW_CONF]
+#       Stop the old cluster, create the new cluster's "test" cluster (same
+#       $INITDB_OPTS), optionally append EXTRA_NEW_CONF to its
+#       postgresql.conf (e.g. to enable pg_tle before pg_upgrade runs), binary
+#       pg_upgrade OLD_PG -> NEW_PG, then start the new cluster and wait for
+#       readiness. On pg_upgrade failure, dumps its logs (PG17+ writes them to
+#       $new_datadir/pg_upgrade_output.d/; older versions write to CWD -- both
+#       are searched) before failing.
+#
+# $INITDB_OPTS (env var, required): initdb options both clusters must share so
+# pg_upgrade sees consistent settings on old and new (e.g.
+# "--data-checksums --auth trust"). Deliberately left unquoted at each use
+# site so its (space-separated) options word-split into separate arguments.
+set -euo pipefail
+
+: "${INITDB_OPTS:?INITDB_OPTS must be set}"
+
+recreate_old() {
+  local pg=$1
+  pg_ctlcluster "$pg" test stop
+  pg_dropcluster "$pg" test
+  # -p 5432: pg_createcluster assigns the next available port, which may not
+  # be 5432 after pg-start has claimed and released it. Force 5432 so
+  # subsequent psql/createdb calls connect without -p.
+  pg_createcluster -p 5432 "$pg" test -- $INITDB_OPTS
+  pg_ctlcluster "$pg" test start
+  pg_isready -t 30
+}
+
+upgrade() {
+  local old_pg=$1 new_pg=$2 extra_conf=${3:-}
+  pg_ctlcluster "$old_pg" test stop
+  pg_createcluster -p 5432 "$new_pg" test -- $INITDB_OPTS
+  # Use `if`, not `&&`: a false test under `set -e` would abort the script.
+  if [ -n "$extra_conf" ]; then
+    echo "$extra_conf" >> "/etc/postgresql/$new_pg/test/postgresql.conf"
+  fi
+  # PG17+ writes logs to $new_datadir/pg_upgrade_output.d/; older versions
+  # write to CWD. Search both on failure.
+  mkdir -p /tmp/pg_upgrade_logs
+  chown postgres:postgres /tmp/pg_upgrade_logs
+  su -c "cd /tmp/pg_upgrade_logs && /usr/lib/postgresql/$new_pg/bin/pg_upgrade \
+    -b /usr/lib/postgresql/$old_pg/bin \
+    -B /usr/lib/postgresql/$new_pg/bin \
+    -d /var/lib/postgresql/$old_pg/test \
+    -D /var/lib/postgresql/$new_pg/test \
+    -o '-c config_file=/etc/postgresql/$old_pg/test/postgresql.conf' \
+    -O '-c config_file=/etc/postgresql/$new_pg/test/postgresql.conf'" postgres \
+    || { find /tmp/pg_upgrade_logs \
+              "/var/lib/postgresql/$new_pg/test/pg_upgrade_output.d" \
+              -name '*.log' 2>/dev/null | sort | xargs -r tail -n +1; exit 1; }
+  pg_ctlcluster "$new_pg" test start
+  pg_isready -t 30
+}
+
+usage() {
+  echo "usage: .github/scripts/pg_upgrade_cluster <subcommand> [args]" >&2
+  echo "  recreate-old PG_VERSION" >&2
+  echo "  upgrade OLD_PG NEW_PG [EXTRA_NEW_CONF]" >&2
+  exit 2
+}
+
+main() {
+  local cmd=${1:-}
+  shift || true
+  case "$cmd" in
+    recreate-old) recreate_old "$@" ;;
+    upgrade)      upgrade "$@" ;;
+    *)            usage ;;
+  esac
+}
+
+main "$@"
