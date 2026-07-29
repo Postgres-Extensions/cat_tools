@@ -13,7 +13,7 @@
 #   EXTENSION_SQL_FILES += sql/<ext_name>.sql
 #   EXTENSION_<ext_name>_VERSION := <version>
 #   EXTENSION_<ext_name>_VERSION_FILE = sql/<ext_name>--<version>.sql
-#   EXTENSION_VERSION_FILES += $(EXTENSION_<ext_name>_VERSION_FILE)
+#   EXTENSION__CURRENT_VERSION__FILES += $(EXTENSION_<ext_name>_VERSION_FILE)
 #   <rules for generating versioned SQL files>
 #
 # Why control files instead of META.json?
@@ -80,10 +80,13 @@ for control_file in "$@"; do
   echo "EXTENSION_SQL_FILES += sql/${ext}.sql"
   echo "EXTENSION_${ext}_VERSION := ${version}"
   echo "EXTENSION_${ext}_VERSION_FILE	= sql/${ext}--\$(EXTENSION_${ext}_VERSION).sql"
-  echo "EXTENSION_VERSION_FILES		+= \$(EXTENSION_${ext}_VERSION_FILE)"
+  echo "EXTENSION__CURRENT_VERSION__FILES		+= \$(EXTENSION_${ext}_VERSION_FILE)"
   echo "\$(EXTENSION_${ext}_VERSION_FILE): sql/${ext}.sql ${control_file}"
-  echo "	@echo '/* DO NOT EDIT - AUTO-GENERATED FILE */' > \$(EXTENSION_${ext}_VERSION_FILE)"
-  echo "	@cat sql/${ext}.sql >> \$(EXTENSION_${ext}_VERSION_FILE)"
+  # Single redirect via a subshell, not `>` truncate followed by `>>` append:
+  # if this rule ever runs twice in the same `make` invocation (e.g. reached
+  # through two different dependency chains under parallel make), the `>>`
+  # form doubles the file's content instead of overwriting it.
+  echo "	@(echo '/* DO NOT EDIT - AUTO-GENERATED FILE */'; cat sql/${ext}.sql) > \$(EXTENSION_${ext}_VERSION_FILE)"
   echo
 done
 

@@ -593,10 +593,18 @@ extract_version_from_filename() {
     # Match patterns:
     # - ext--1.0.0 → FROM_VERSION=1.0.0, TO_VERSION=""
     # - ext--1.0.0--2.0.0 → FROM_VERSION=1.0.0, TO_VERSION=2.0.0
+    # - ext--stable → FROM_VERSION=stable, TO_VERSION="" (pg_tle treats
+    #   versions as opaque strings; see check_valid_version_name() in
+    #   pg_tle's tleextension.c, which only forbids empty strings, "--",
+    #   and leading/trailing "-" — no numeric requirement)
+    #
+    # Each version segment is [^-]+(-[^-]+)* : one or more non-dash runs
+    # joined by single dashes, so a segment can't be empty, start/end with
+    # "-", or contain "--" (which is reserved as the FROM/TO delimiter).
 
-    if [[ "$basename" =~ ^${EXTENSION}--([0-9][0-9.]*)(--([0-9][0-9.]*))?$ ]]; then
+    if [[ "$basename" =~ ^${EXTENSION}--([^-]+(-[^-]+)*)(--([^-]+(-[^-]+)*))?$ ]]; then
         FROM_VERSION="${BASH_REMATCH[1]}"
-        TO_VERSION="${BASH_REMATCH[3]}"  # Empty for non-upgrade files
+        TO_VERSION="${BASH_REMATCH[4]}"  # Empty for non-upgrade files
         return 0
     else
         die 1 "Cannot parse version from filename: $filename
