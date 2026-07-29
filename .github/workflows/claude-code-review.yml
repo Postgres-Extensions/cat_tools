@@ -40,6 +40,13 @@ jobs:
       contents: read
       pull-requests: write   # post the review comments
       checks: read           # read sibling check-runs for the cost gate
+      # GitHub has no narrower "cache write" scope -- actions: write is the
+      # only permission that lets a step save an Actions cache entry (it also
+      # grants cancelling/deleting workflow runs and managing artifacts, which
+      # this job doesn't use). Without it, claude-code-review's own setup step
+      # can never write a cache, only ever miss. Granted here on top of the
+      # existing trusted-fork-owner gate below, not instead of it.
+      actions: write
     steps:
       # COST GATE: the paid Claude review is the last thing to run. Wait for the
       # PR head's OTHER check-runs to finish and only proceed if they are clean.
