@@ -77,15 +77,29 @@ DATA += $(upgrade_scripts_out)
 DATA := $(sort $(DATA))
 
 all: sql/cat_tools.sql $(versioned_out)
-# `install` is an explicit prerequisite here (not just a fellow TEST_DEPS entry)
-# because pgxntool 2.2.0's check-stale-expected also depends directly on
-# installcheck and sits earlier in TEST_DEPS than test-build/install: Make
-# resolves that edge first, running installcheck (and installing nothing)
-# before TEST_DEPS's own install/installcheck pair ever runs, on a tree where
-# nothing is installed yet (e.g. fresh CI). See
-# https://github.com/Postgres-Extensions/pgxntool/issues/79.
-installcheck: install sql/cat_tools.sql $(versioned_out)
+installcheck: sql/cat_tools.sql $(versioned_out)
 EXTRA_CLEAN += sql/cat_tools.sql $(versioned_out)
+
+# pgxntool 2.2.0's check-stale-expected depends directly on installcheck, but
+# base.mk appends it to TEST_DEPS -- and so freezes `test`'s prerequisite list,
+# expanded at the `test: $(TEST_DEPS)` rule's parse time -- BEFORE
+# test-build/install/installcheck are appended. Reassigning TEST_DEPS from
+# here does not help: it's too late to change a prerequisite list Make already
+# expanded. So `make test` resolves check-stale-expected's installcheck edge
+# BEFORE test-build's install edge, running the full suite before install ever
+# runs on a tree where nothing is installed yet (e.g. fresh CI) -- reproduced
+# there as every test failing with schema "cat_tools" does not exist. Filed
+# upstream: https://github.com/Postgres-Extensions/pgxntool/issues/79.
+#
+# Give installcheck itself an install prerequisite to fix it, EXCEPT in
+# TEST_EXISTING_DEPLOY=pgtle mode: bin/test_existing's pg_tle-mode run_suite
+# deliberately calls `testdeps installcheck` directly (bypassing `test`'s own
+# install prerequisite, and thus never touching check-stale-expected at all)
+# specifically so the filesystem is never touched -- an unconditional
+# installcheck-level fix would defeat that.
+ifneq ($(TEST_EXISTING_DEPLOY),pgtle)
+installcheck: install
+endif
 
 #
 # relkind drift source generation
