@@ -659,7 +659,7 @@ jobs:
     runs-on: ubuntu-latest
     container: pgxn/pgxn-tools
     env:
-      PGTLE_VERSION: "1.5.2"
+      PG_TLE_RELEASE: "1.5.2"
     steps:
       # A dedicated cluster, never shared with the other jobs in this
       # workflow: pg_tle requires shared_preload_libraries and mixing
@@ -690,12 +690,12 @@ jobs:
         # of being registered via pg_tle -- not just cat_tools -- without
         # hardcoding contrib/pgtap names.
         run: bin/assert_fs_clean snapshot ${{ matrix.pg }} /tmp/control_baseline.txt
-      - name: Build and install pg_tle ${{ env.PGTLE_VERSION }}
+      - name: Build and install pg_tle ${{ env.PG_TLE_RELEASE }}
         # flex/bison/libkrb5-dev aren't in the pgxn-tools image; pg_tle's build
         # needs them (guc-file.l, and clientauth.c includes gssapi.h).
         run: |
           apt-get install -y flex bison libkrb5-dev
-          git clone --branch v${{ env.PGTLE_VERSION }} --depth 1 https://github.com/aws/pg_tle.git /tmp/pg_tle
+          git clone --branch v${{ env.PG_TLE_RELEASE }} --depth 1 https://github.com/aws/pg_tle.git /tmp/pg_tle
           make -C /tmp/pg_tle install
       - name: Enable pg_tle and restart PostgreSQL ${{ matrix.pg }}
         run: |
@@ -791,7 +791,7 @@ jobs:
       # Both clusters must use the same initdb options so pg_upgrade sees
       # consistent settings (checksums, auth) on old and new clusters.
       INITDB_OPTS: --data-checksums --auth trust
-      PGTLE_VERSION: "1.5.2"
+      PG_TLE_RELEASE: "1.5.2"
     steps:
       # A dedicated cluster pair, never shared with the other jobs in this
       # workflow -- same reasoning as pg-tle-test.
@@ -805,12 +805,12 @@ jobs:
         run: .github/scripts/pg_upgrade_cluster recreate-old ${{ matrix.old_pg }}
       - name: Snapshot filesystem extension control files (old cluster baseline)
         run: bin/assert_fs_clean snapshot ${{ matrix.old_pg }} /tmp/control_baseline_old.txt
-      - name: Build and install pg_tle ${{ env.PGTLE_VERSION }} on the old cluster
+      - name: Build and install pg_tle ${{ env.PG_TLE_RELEASE }} on the old cluster
         # flex/bison/libkrb5-dev aren't in the pgxn-tools image; pg_tle's build
         # needs them (guc-file.l, and clientauth.c includes gssapi.h).
         run: |
           apt-get install -y flex bison libkrb5-dev
-          git clone --branch v${{ env.PGTLE_VERSION }} --depth 1 https://github.com/aws/pg_tle.git /tmp/pg_tle_old
+          git clone --branch v${{ env.PG_TLE_RELEASE }} --depth 1 https://github.com/aws/pg_tle.git /tmp/pg_tle_old
           make -C /tmp/pg_tle_old install
       - name: Enable pg_tle and restart PostgreSQL ${{ matrix.old_pg }}
         run: |
@@ -849,7 +849,7 @@ jobs:
         run: PATH=/usr/lib/postgresql/${{ matrix.new_pg }}/bin:$PATH make pgtap
       - name: Snapshot filesystem extension control files (new cluster baseline)
         run: bin/assert_fs_clean snapshot ${{ matrix.new_pg }} /tmp/control_baseline_new.txt
-      - name: Build and install pg_tle ${{ env.PGTLE_VERSION }} on the new cluster
+      - name: Build and install pg_tle ${{ env.PG_TLE_RELEASE }} on the new cluster
         # Only pg_tle's OWN framework is needed on the new binary tree -- NOT
         # cat_tools. Binary pg_upgrade's schema-only restore recreates each
         # object individually (binary_upgrade_create_empty_extension), and
@@ -861,7 +861,7 @@ jobs:
         # code, unlike cat_tools, so switching PG_CONFIG on an already-built
         # tree without a fresh build would risk installing the wrong binary.
         run: |
-          git clone --branch v${{ env.PGTLE_VERSION }} --depth 1 https://github.com/aws/pg_tle.git /tmp/pg_tle_new
+          git clone --branch v${{ env.PG_TLE_RELEASE }} --depth 1 https://github.com/aws/pg_tle.git /tmp/pg_tle_new
           make -C /tmp/pg_tle_new install PG_CONFIG=/usr/lib/postgresql/${{ matrix.new_pg }}/bin/pg_config
       - name: Verify no stray extension control files on the new cluster (pre-upgrade)
         run: bin/assert_fs_clean verify ${{ matrix.new_pg }} /tmp/control_baseline_new.txt

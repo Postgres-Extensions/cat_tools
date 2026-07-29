@@ -32,7 +32,7 @@ from:
   source (git clone + C compile) fresh in every `pg-tle-test` matrix entry and on both the old
   and new cluster in every `pg-tle-upgrade-test` leg -- the same pg_tle version, rebuilt
   repeatedly across runs with nothing changed. Caching the built `pg_tle.so` + control/SQL
-  files (keyed on PG major version + `PGTLE_VERSION`) would skip the clone+compile entirely on
+  files (keyed on PG major version + `PG_TLE_RELEASE`) would skip the clone+compile entirely on
   a cache hit, without touching the job's logic at all. Worth trying before hand-rolled
   parallelism if CI time on the pg_tle jobs becomes a real pain point.
 - **Double-run check**: this repo's `push:` trigger is scoped to `branches: [master]` (not a
