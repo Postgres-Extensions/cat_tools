@@ -38,11 +38,11 @@
 #
 #   update-check-version DB FROM_VERSION TO_VERSION
 #       Same as update-check but WITHOUT the structural comparison: for a
-#       landing point where a fresh-install divergence is documented and
-#       deliberately deferred to a LATER update script (an already-published
-#       script is never retroactively edited -- see the 0.2.0->0.2.2 /
-#       0.2.1->0.2.2 scripts and the repairs living in 0.2.2->0.2.3 instead).
-#       Only asserts the version landed.
+#       landing point pinned at an already-tagged version, where a fresh-
+#       install divergence is documented and can only converge forward into a
+#       LATER, still-unpublished update script (an already-published
+#       version-specific file is never retroactively edited). Only asserts the
+#       version landed.
 #
 #   diff-fresh DB VERSION
 #       Structurally compare DB's cat_tools objects against a throwaway fresh
@@ -259,14 +259,23 @@ update_scenario() {
 # update-check-version DB FROM_VERSION TO_VERSION
 #   Lightweight check that a specific update script applies (no suite): used
 #   for the pre-0.2.2 scripts, which only install on PG10 and target 0.2.2 (not
-#   the current version, so the suite cannot run against them). Asserts only
-#   the version landed -- no structural comparison, because landing on 0.2.2
-#   from 0.2.0/0.2.1 is a KNOWN divergence from a fresh 0.2.2 install
-#   (trigger__parse body, the pg_class_v omit_column bug, and the type-ACL gap
-#   fixed retroactively in cat_tools--0.2.2--0.2.3.sql.in): the already-
-#   published 0.2.0->0.2.2 / 0.2.1->0.2.2 scripts are never edited to fix it
-#   directly, so asserting fresh-parity at this landing point would fail
-#   forever by design, not from a regression.
+#   the current version, so the suite cannot run against them). Also used for
+#   ANY update path landing on 0.2.3, regardless of origin -- 0.2.3 is itself
+#   already tagged/published, and a version-specific file is NEVER edited once
+#   tagged (CLAUDE.md's SQL file conventions rule 5), so a divergence at that
+#   landing point can never be repaired in place; the fix has to converge
+#   forward into 0.2.3->0.3.0 instead, the same way PR #46 converged its own
+#   fix forward into 0.2.2->0.2.3 rather than editing 0.2.0/0.2.1's already-
+#   published scripts. Two such divergences exist for 0.2.3: a comment-only
+#   drift between the frozen sql/cat_tools--0.2.3.sql.in fresh-install script
+#   (never got PR #46's comment tweaks) and the 0.2.2->0.2.3 update script
+#   (which did) affects EVERY origin, including a fresh 0.2.2; a type-ACL gap
+#   on five enum types predating 0.2.2 affects only a 0.2.0/0.2.1 origin
+#   (0.2.2->0.2.3 never grants it, since a fresh 0.2.2 already has it and so
+#   never needed the grant added there). Either way, asserting fresh-parity at
+#   a landing point pinned to an already-tagged version fails forever by
+#   design, not from a regression -- see update-check's comment for the
+#   version where full parity IS expected and proven.
 update_check_version() {
   local db=$1 from=$2 to=$3
   createdb "$db"
@@ -281,10 +290,18 @@ update_check_version() {
 #   of check that would have caught
 #   https://github.com/Postgres-Extensions/cat_tools/pull/46's trigger__parse
 #   divergence: an update script reaching TO_VERSION with a different function
-#   body than a fresh install of it. Use this only where convergence with a
-#   fresh install is actually expected (e.g. the 0.2.3 target, where the
-#   deferred repairs above have already run); see update-check-version's
-#   comment for the landing point where it is not.
+#   body than a fresh install of it. Only use this where TO_VERSION is a
+#   target the update path is actually expected to converge on. Every
+#   ALREADY-TAGGED version is a poor fit for this: a comment-only tweak PR #46
+#   made to sql/cat_tools.sql.in and the 0.2.2->0.2.3 update script never
+#   reached the frozen sql/cat_tools--0.2.3.sql.in fresh-install script (a
+#   version-specific file, once tagged, is NEVER edited to fix this kind of
+#   drift -- see CLAUDE.md's SQL file conventions rule 5), so ANY path
+#   reaching 0.2.3 diverges from "fresh install pinned at exactly 0.2.3",
+#   regardless of origin -- use update-check-version for any TO_VERSION that
+#   is already tagged. Reaching the CURRENT version is where convergence is
+#   both expected and proven (see update-scenario, and diff-fresh against
+#   any already-populated database).
 update_check() {
   local db=$1 from=$2 to=$3
   update_check_version "$db" "$from" "$to"

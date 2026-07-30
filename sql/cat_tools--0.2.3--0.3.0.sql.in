@@ -902,3 +902,24 @@ DROP FUNCTION __cat_tools.create_function(
   , comment text
 );
 DROP SCHEMA __cat_tools;
+
+/*
+ * Converge the ACL of the five enum types that predate 0.2.2 (constraint_type,
+ * procedure_type, relation_type, relation_relkind, object_type) to the
+ * fresh-install state. ALTER DEFAULT PRIVILEGES (near the top of
+ * sql/cat_tools.sql.in) only applies to objects created AFTER it runs; these
+ * types were created back in 0.2.0/0.2.1, so the 0.2.0->0.2.2 and 0.2.1->0.2.2
+ * update scripts never granted USAGE on them, and neither does 0.2.2->0.2.3 --
+ * a 0.2.0/0.2.1-origin database is still missing the grant on reaching 0.2.3.
+ * Both already-released scripts are immutable, so the fix converges forward
+ * here instead, on the first still-unpublished update script downstream of the
+ * gap. A fresh install at any version creates these types AFTER the statement
+ * and already has the grant, so GRANT's idempotency makes this a no-op there.
+ */
+GRANT USAGE ON TYPE
+  cat_tools.constraint_type
+  , cat_tools.procedure_type
+  , cat_tools.relation_type
+  , cat_tools.relation_relkind
+  , cat_tools.object_type
+  TO cat_tools__usage;

@@ -362,22 +362,4 @@ $$v_create_stanza = "%"
 END
 $body$;
 
-/*
- * Converge the ACL of the five enum types that predate 0.2.2 (constraint_type,
- * procedure_type, relation_type, relation_relkind, object_type) to the
- * fresh-install state. ALTER DEFAULT PRIVILEGES (above) only applies to
- * objects created AFTER it runs; these types were created back in 0.2.0/0.2.1,
- * so the 0.2.0->0.2.2 / 0.2.1->0.2.2 update scripts never granted USAGE on
- * them retroactively, while a fresh 0.2.2+ install creates them AFTER the
- * statement and picks up the grant automatically. GRANT is idempotent, so this
- * is a no-op on a database that already has it (a fresh 0.2.2+ install).
- */
-GRANT USAGE ON TYPE
-  cat_tools.constraint_type
-  , cat_tools.procedure_type
-  , cat_tools.relation_type
-  , cat_tools.relation_relkind
-  , cat_tools.object_type
-  TO cat_tools__usage;
-
 -- vi: expandtab ts=2 sw=2
