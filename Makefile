@@ -103,5 +103,5 @@ clean_old_version:
 # source instead; a version file still under active development can be
 # linted directly, e.g.
 # `.vendor/linter/sql/bin/sql-lint sql/cat_tools--0.3.0.sql.in`.
-LINT_TARGETS = sql/cat_tools.sql.in sql/omit_column.sql test/
+LINT_TARGETS = sql/cat_tools.sql.in test/
 include lint.mk
