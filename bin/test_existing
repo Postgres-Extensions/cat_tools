@@ -28,10 +28,23 @@
 #
 #   update-scenario DB FROM_VERSION
 #       Create DB + extension at FROM_VERSION, plant guard, update to current,
-#       run the suite against that real updated database.
+#       structurally compare against a fresh install of current (see
+#       diff-fresh), run the suite against that real updated database.
 #
 #   update-check DB FROM_VERSION TO_VERSION
-#       Lightweight check that a specific update script applies (no suite).
+#       Lightweight check that a specific update script applies (no suite),
+#       then structurally compare against a fresh install of TO_VERSION (see
+#       diff-fresh).
+#
+#   diff-fresh DB VERSION
+#       Structurally compare DB's cat_tools objects against a throwaway fresh
+#       install of VERSION (function/view definitions, type labels, comments,
+#       ACLs, extension membership -- see bin/structural_diff.sql). Fails loudly
+#       on any nonempty diff. Generalizes a manual comparison that found the
+#       trigger__parse divergence fixed by
+#       https://github.com/Postgres-Extensions/cat_tools/pull/46; update-scenario
+#       and update-check both call this automatically, but it's also directly
+#       useful standalone against any already-populated database.
 #
 # Run `bin/test_existing` with no subcommand to print usage.
 #
@@ -168,6 +181,27 @@ update_ext() {
   psql_do "$db" -c "ALTER EXTENSION cat_tools UPDATE $to"
 }
 
+# Structurally compare DB's cat_tools objects (function/view definitions, type
+# labels, comments, ACLs, extension membership -- see bin/structural_diff.sql)
+# against a FRESH install of VERSION. An update script only really "supports"
+# a version if updating to it reaches the SAME objects a fresh install would;
+# https://github.com/Postgres-Extensions/cat_tools/pull/46 found a real
+# divergence this way by hand (a pre-0.2.2 update script's trigger__parse body
+# didn't match the fresh-install body, breaking every trigger parse on
+# PG11+). Runs in a subshell so the EXIT trap dropping the throwaway reference
+# database is scoped to this call, not the whole script (see the same pattern,
+# and why it must be a subshell rather than a plain function-local trap, in
+# bin/structural_diff's compare()).
+assert_matches_fresh() {
+  local db=$1 version=$2 fresh_db="${db}__fresh_ref"
+  (
+    trap 'dropdb --if-exists "$fresh_db"' EXIT
+    createdb "$fresh_db"
+    psql_do "$fresh_db" -c "CREATE EXTENSION cat_tools VERSION '$version'"
+    bin/structural_diff compare "$db" "$fresh_db"
+  )
+}
+
 # ---------------------------------------------------------------------------
 # Subcommand implementations
 # ---------------------------------------------------------------------------
@@ -198,26 +232,35 @@ prepare_old() {
 # update-scenario DB FROM_VERSION
 #   Full extension-update flow that runs the existing-mode suite: create the DB
 #   and extension at FROM_VERSION, plant + prove the guard, update to the current
-#   version, then run the suite against that real updated database.
+#   version, structurally compare the result against a fresh install of the
+#   current version (assert_matches_fresh), then run the suite against that
+#   real updated database.
 update_scenario() {
   local db=$1 from=$2
   createdb "$db"
   psql_do "$db" -c "CREATE EXTENSION cat_tools VERSION '$from'"
   plant_guard "$db"
   update_ext "$db"
+  assert_matches_fresh "$db" "$(current_version)"
   run_suite "$db"
 }
 
 # update-check DB FROM_VERSION TO_VERSION
 #   Lightweight check that a specific update script applies (no suite): used for
 #   the pre-0.2.2 scripts, which only install on PG10 and target 0.2.2 (not the
-#   current version, so the suite cannot run against them).
+#   current version, so the suite cannot run against them). Still structurally
+#   compares the result against a fresh install of TO_VERSION
+#   (assert_matches_fresh) -- this is precisely the shape of check that would
+#   have caught https://github.com/Postgres-Extensions/cat_tools/pull/46's
+#   trigger__parse divergence: a pre-0.2.2 update script reaching 0.2.2 with a
+#   different function body than a fresh 0.2.2 install.
 update_check() {
   local db=$1 from=$2 to=$3
   createdb "$db"
   psql_do "$db" -c "CREATE EXTENSION cat_tools VERSION '$from'"
   update_ext "$db" "$to"
   assert_version "$db" "$to"
+  assert_matches_fresh "$db" "$to"
 }
 
 # Run the pgTAP suite against an already-populated database in existing mode.
@@ -273,6 +316,7 @@ usage() {
   echo "  run-suite DB" >&2
   echo "  update-scenario DB FROM_VERSION" >&2
   echo "  update-check DB FROM_VERSION TO_VERSION" >&2
+  echo "  diff-fresh DB VERSION" >&2
   exit 2
 }
 
@@ -289,6 +333,7 @@ main() {
     run-suite)       run_suite "$@" ;;
     update-scenario) update_scenario "$@" ;;
     update-check)    update_check "$@" ;;
+    diff-fresh)      assert_matches_fresh "$@" ;;
     *)               usage ;;
   esac
 }

@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+#
+# Structurally compare, object-by-object, every member of the cat_tools
+# extension in two databases: function bodies (pg_get_functiondef), view
+# definitions (pg_get_viewdef), type labels/columns (enums, the one plain
+# table, the one standalone composite type), comments, and ACLs. A nonempty
+# diff is a bug -- the whole point of an extension UPDATE script is that it
+# reaches the SAME objects a fresh install of the target version would.
+#
+# This generalizes a manual comparison run by hand while fixing
+# https://github.com/Postgres-Extensions/cat_tools/pull/46: that PR found a
+# real fresh-vs-update divergence this way (cat_tools.trigger__parse, as
+# produced by the pre-0.2.2 update scripts, hardcoded `EXECUTE PROCEDURE` and
+# skipped an empty-args guard that the fresh-install body had, breaking every
+# trigger parse on PG11+). Committing the comparison as a script makes it a
+# standing, automated check instead of something that has to be remembered
+# and run by hand.
+#
+# USAGE: bin/structural_diff <subcommand> [args]
+#
+#   dump DB [EXTNAME]
+#       Print the signature of every EXTNAME member object in DB (EXTNAME
+#       defaults to cat_tools). Useful on its own for eyeballing one
+#       database's structure, and it's what `compare` diffs under the hood.
+#
+#   compare DB1 DB2 [EXTNAME]
+#       Dump both databases and diff them. Prints a unified diff and exits
+#       non-zero if they differ; exits 0 (and prints an OK line) if
+#       identical.
+#
+# See bin/structural_diff.sql for the query that defines "signature" (and how
+# it decides which object kinds get a real structural definition vs. falling
+# back to just identity/comment/ACL).
+set -euo pipefail
+
+SCRIPT_DIR=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
+
+# ---------------------------------------------------------------------------
+# Subcommand implementations
+# ---------------------------------------------------------------------------
+
+dump() {
+  local db=$1 extname=${2:-cat_tools}
+  psql -d "$db" -v extname="'$extname'" -f "$SCRIPT_DIR/structural_diff.sql"
+}
+
+compare() {
+  local db1=$1 db2=$2 extname=${3:-cat_tools}
+  # Run in a subshell so the EXIT trap (temp-file cleanup) is scoped to this
+  # comparison only. A trap set with plain `trap ... RETURN` is NOT scoped to
+  # the function that set it -- it re-fires on every later function return in
+  # the same shell, including main()'s, by which point f1/f2 no longer exist.
+  (
+    f1=$(mktemp)
+    f2=$(mktemp)
+    trap 'rm -f "$f1" "$f2"' EXIT
+    dump "$db1" "$extname" > "$f1"
+    dump "$db2" "$extname" > "$f2"
+    if diff -u --label "$db1" --label "$db2" "$f1" "$f2"; then
+      echo "OK: '$db1' and '$db2' are structurally identical for extension '$extname'"
+    else
+      echo "FAIL: structural diff between '$db1' and '$db2' for extension '$extname' (see diff above) -- an update path reached objects that differ from a fresh install" >&2
+      exit 1
+    fi
+  )
+}
+
+usage() {
+  echo "usage: bin/structural_diff <subcommand> [args]" >&2
+  echo "  dump DB [EXTNAME]" >&2
+  echo "  compare DB1 DB2 [EXTNAME]" >&2
+  exit 2
+}
+
+# Explicit subcommand dispatch on $1, matching bin/test_existing and
+# bin/assert_fs_clean's convention.
+main() {
+  local cmd=${1:-}
+  shift || true
+  case "$cmd" in
+    dump)    dump "$@" ;;
+    compare) compare "$@" ;;
+    *)       usage ;;
+  esac
+}
+
+main "$@"
