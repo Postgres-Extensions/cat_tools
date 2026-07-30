@@ -14,12 +14,8 @@ on:
 # serializing would only delay responses and cancelling would drop them.
 jobs:
   claude:
-    # SECURITY: gated to github.actor == 'jnasbyupgrade' so only that account
-    # can invoke Claude via @claude mentions. Without this, any GitHub user
-    # (or bot) commenting/opening an issue containing "@claude" would cause
-    # this job to run using the org's Claude Code OAuth token and a
-    # repo-scoped GITHUB_TOKEN. To add more trusted accounts, extend the
-    # actor check.
+    # SECURITY: restricts @claude to a single trusted account, not just
+    # matching comment text — otherwise anyone could trigger this job.
     if: |
       github.actor == 'jnasbyupgrade' &&
       (
