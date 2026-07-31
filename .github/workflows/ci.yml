@@ -310,9 +310,10 @@ jobs:
           make check-relkind-source
           # verify-results is the real gate: base.mk declares `verify-results:
           # test`, so this runs the suite via its `test` prerequisite and then
-          # checks the pgtap/regression.diffs. A bare `make test` is redundant here
-          # and would not gate anyway -- it never exits non-zero on regressions
-          # (pgxntool marks installcheck `.IGNORE`), so failures would pass silently.
+          # checks the pgtap/regression.diffs. A bare `make test` is redundant here:
+          # it now also exits non-zero on regressions (pgxntool 2.3.0+), but
+          # verify-results is still the stricter, documented check, and confirms
+          # test actually ran.
           make verify-results
 
   # Style linter (https://github.com/Postgres-Extensions/linter, vendored at

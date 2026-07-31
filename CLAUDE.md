@@ -14,9 +14,11 @@ and `pgxntool/CLAUDE.md` first. High-value gotchas that those docs explain:
 
 - `DATA`, `MODULES`, `DOCS`, and `installcheck` are PGXS variables/targets, not
   pgxntool's; pgxntool only wraps/seeds them. Don't assume they belong to pgxntool.
-- `make test` does **not** return non-zero on test regressions — pgxntool marks
-  `installcheck` as `.IGNORE`. To actually detect failures, use `make verify-results`
-  (or inspect `test/regression.diffs`). This is why CI must gate on `verify-results`.
+- `make test` returns non-zero on test regressions (pgxntool 2.3.0+): `installcheck`
+  itself is still marked `.IGNORE`, but `test`'s own recipe now checks
+  `test/regression.diffs` and exits non-zero if it's non-empty. `make verify-results`
+  remains the stricter, documented CI gate (it also confirms `test` actually ran), but
+  a bare `make test` failing locally is now a real signal too.
 - `test/install/*.sql` runs once, committed, before the suite in the same `pg_regress`
   invocation, so its state persists into every test. `test/build/*.sql` are separate
   build sanity checks run before the suite.
