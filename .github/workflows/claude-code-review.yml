@@ -120,4 +120,11 @@ jobs:
           # marketplace repo's default branch (upstream anthropics/claude-code).
           plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
           plugins: 'code-review@claude-code-plugins'
-          prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
+          # --comment is required: without it, the code-review plugin only
+          # prints its findings to the job log and never posts anything to
+          # the PR (confirmed by capturing the hidden SDK transcript on a
+          # canary PR in pgxntool-test: the review correctly found an
+          # injected bug but ended with "No `--comment` argument was
+          # provided, so no GitHub comments were posted"). Every review run
+          # before this fix has been silently invisible on GitHub.
+          prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }} --comment'
