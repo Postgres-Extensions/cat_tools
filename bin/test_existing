@@ -252,6 +252,9 @@ run_suite() {
     # directly (skips its `test` prerequisite) -- but with a throwaway DESTDIR
     # so installcheck's own (now unconditional, see the comment above) install
     # prerequisite writes nowhere near the real extension directory.
+    # TODO: drop this DESTDIR redirect once pgxntool grows a real install-skip
+    # override (https://github.com/Postgres-Extensions/pgxntool/issues/55) and
+    # use that instead.
     local pgtle_destdir
     pgtle_destdir=$(mktemp -d)
     make testdeps $existing_args
