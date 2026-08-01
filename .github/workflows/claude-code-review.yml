@@ -128,3 +128,14 @@ jobs:
           # provided, so no GitHub comments were posted"). Every review run
           # before this fix has been silently invisible on GitHub.
           prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }} --comment'
+          # A direct `prompt:` (no @claude mention) runs the action in "agent
+          # mode". In that mode, claude-code-action only installs the
+          # github_inline_comment MCP server if it sees
+          # mcp__github_inline_comment__create_inline_comment listed in an
+          # --allowedTools flag inside claude_args (src/modes/agent/parse-tools.ts) --
+          # it does NOT look at the code-review plugin's own `allowed-tools`
+          # frontmatter to decide that. Without this, the MCP server never
+          # starts, the tool genuinely doesn't exist in the session, and the
+          # plugin silently falls back to one consolidated PR comment instead
+          # of real inline line comments.
+          claude_args: '--allowedTools mcp__github_inline_comment__create_inline_comment'
