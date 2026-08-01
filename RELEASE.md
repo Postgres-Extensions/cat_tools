@@ -37,10 +37,13 @@ what that version actually shipped.
 ## 2. Pre-release checks
 - [ ] Open issues/PRs for this release reviewed, merged or deferred.
 - [ ] CI green on all supported PostgreSQL versions (the `all-checks-passed` job on master).
-- [ ] Locally: `make verify-results` passes. It depends on `test` (so it runs the suite
-      first, then gates on the results). `make test` itself also returns non-zero on a
-      regression as of pgxntool 2.3.0, but `verify-results` remains the stricter,
-      documented gate (it also confirms `test` actually ran).
+- [ ] Locally: `make verify-results` passes. It depends on `$(TEST_DEPS)` directly, not
+      on `test` itself (deliberately — see `base.mk`'s own comment on why: `test`'s early
+      exit on a regression would otherwise abort the chain before verify-results got to
+      inspect and report the diff), so it still runs the suite first, then gates on the
+      results with a stricter pgtap-aware check. `make test` itself also returns
+      non-zero on a regression as of pgxntool 2.3.0, but `verify-results` remains the
+      stricter, documented gate.
 
 ## 3. Decide the version and what to track
 - [ ] Pick the new version (semantic versioning).
