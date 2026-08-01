@@ -1,0 +1,45 @@
+name: Cancel stale runs on PR close
+
+# GitHub Actions has no direct "cancel in-flight runs when a PR closes/merges"
+# trigger -- concurrency groups only cancel a running job/workflow when a NEW
+# entrant joins the SAME group. These two jobs deliberately do nothing except
+# join the exact concurrency groups that ci.yml and claude-code-review.yml
+# already use, so a PR closing (merged or not) cancels any CI matrix -- and,
+# more importantly, any still-running (money-costing) Claude review -- for a
+# PR nobody can act on anymore. Concurrency groups are enforced repo-wide,
+# not scoped to the workflow file that declares them, so joining the same
+# group string from here works.
+#
+# COUPLING: these group strings are copies, not references -- if ci.yml's
+# `name:` or its `concurrency.group:` formula, or claude-code-review.yml's
+# `concurrency.group:` formula, ever changes, update the matching string
+# below or cancellation here silently stops matching (no error, it just
+# becomes its own no-op group). ci.yml's verify-cancel-on-close-coupling job
+# guards this automatically on every push -- it fails CI if those files or
+# fields drift, so this comment is a "why", not the only line of defense.
+on:
+  pull_request:
+    types: [closed]
+
+permissions: {}
+
+jobs:
+  cancel-ci:
+    # Matches ci.yml's `group: ${{ github.workflow }}-${{ github.ref }}`,
+    # where github.workflow is that file's `name: CI` and github.ref for a
+    # pull_request-triggered run is refs/pull/<number>/merge.
+    concurrency:
+      group: CI-refs/pull/${{ github.event.pull_request.number }}/merge
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Cancelled any in-flight CI run for PR #${{ github.event.pull_request.number }}"
+
+  cancel-claude-review:
+    # Matches claude-code-review.yml's `group: claude-review-<pr-number>`.
+    concurrency:
+      group: claude-review-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Cancelled any in-flight Claude review for PR #${{ github.event.pull_request.number }}"

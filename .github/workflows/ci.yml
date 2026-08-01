@@ -4,6 +4,13 @@ on:
     branches:
       - master
   pull_request:
+concurrency:
+  # Don't let a superseded push's full matrix (dozens of legs, several
+  # compiling pg_tle from source) keep occupying runner slots once a newer
+  # push on the same ref supersedes it. Not for master: every push there is
+  # its own point in history and should get a complete, uncancelled run.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
 env:
   PGUSER: postgres
 jobs:
@@ -328,6 +335,74 @@ jobs:
       - name: Lint SQL
         run: make lint
 
+  # cancel-on-close.yml cancels in-flight CI/claude-review runs on PR close by
+  # joining the SAME concurrency group strings this workflow and
+  # claude-code-review.yml use -- but it only works because those strings are
+  # hand-copied there, not referenced. No `if: docs_only` gate here on
+  # purpose: this is a near-instant metadata check, not worth ever skipping,
+  # and workflow files aren't "docs" anyway.
+  verify-cancel-on-close-coupling:
+    name: 🔗 Verify cancel-on-close.yml coupling
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v6
+      - name: Confirm ci.yml / claude-code-review.yml still match cancel-on-close.yml's assumptions
+        run: |
+          python3 - <<'PY'
+          import os, sys, yaml
+
+          # GitHub Actions pre-substitutes any expression marker (dollar sign
+          # directly followed by double-open-brace) it finds anywhere in a
+          # run: block's raw text -- including inside this heredoc -- before
+          # the script ever runs, regardless of quoting. D keeps that four-
+          # character sequence from ever appearing contiguously in this file
+          # (not even in this comment -- deliberately not spelled out here),
+          # so the expected strings below stay literal text for Python to
+          # compare against, instead of being evaluated away by Actions
+          # itself (which would make this check compare each expression's
+          # live value against itself -- always "equal", catching nothing).
+          D = "$"
+
+          def load(path):
+              if not os.path.isfile(path):
+                  return None, f"{path} does not exist"
+              with open(path) as f:
+                  return yaml.safe_load(f), None
+
+          errors = []
+
+          ci, err = load('.github/workflows/ci.yml')
+          if err:
+              errors.append(err)
+          else:
+              if ci.get('name') != 'CI':
+                  errors.append(f"ci.yml name is {ci.get('name')!r}, expected 'CI'")
+              ci_group = (ci.get('concurrency') or {}).get('group')
+              expected = D + "{{ github.workflow }}-" + D + "{{ github.ref }}"
+              if ci_group != expected:
+                  errors.append(f"ci.yml concurrency.group is {ci_group!r}, expected {expected!r}")
+
+          review, err = load('.github/workflows/claude-code-review.yml')
+          if err:
+              errors.append(err)
+          elif not review.get('jobs', {}).get('claude-review'):
+              errors.append("claude-code-review.yml no longer has a 'claude-review' job")
+          else:
+              review_group = (review.get('concurrency') or {}).get('group')
+              expected = "claude-review-" + D + "{{ github.event.pull_request.number }}"
+              if review_group != expected:
+                  errors.append(f"claude-code-review.yml concurrency.group is {review_group!r}, expected {expected!r}")
+
+          if errors:
+              print("cancel-on-close.yml's assumptions about ci.yml / claude-code-review.yml no longer hold:")
+              for e in errors:
+                  print(f"  - {e}")
+              print("Update the hardcoded group: strings in .github/workflows/cancel-on-close.yml (or restore the files/fields) to match.")
+              sys.exit(1)
+          print("OK: cancel-on-close.yml's group strings still match ci.yml and claude-code-review.yml.")
+          PY
+
   # Proves cat_tools survives a BINARY pg_upgrade (in-place catalog migration to a
   # newer PostgreSQL major), not just an in-place extension update. Each leg is a
   # SINGLE jump: install an old cat_tools on an old cluster, plant a dependency
@@ -338,8 +413,14 @@ jobs:
   # new one. Every leg's new_pg supports the current version (PG12+); the
   # version-by-version climb through EVERY major is pg-upgrade-stepwise.
   pg-upgrade-test:
-    needs: [changes]
-    if: needs.changes.outputs.docs_only != 'true'
+    # Gated behind test+lint (not just changes): this matrix is expensive
+    # (multiple binary pg_upgrades per leg), and every leg would fail anyway
+    # on a baseline that's already broken by a failing fresh-install test or
+    # lint violation. success() is required explicitly once a job's `if:`
+    # references anything -- GitHub only assumes success() as a default when
+    # no `if:` is written at all.
+    needs: [changes, test, lint]
+    if: success() && needs.changes.outputs.docs_only != 'true'
     strategy:
       matrix:
         include:
@@ -457,8 +538,9 @@ jobs:
   # the guard survived each step. CI-heavy on purpose: it installs PostgreSQL 10
   # through 18, performs 8 sequential pg_upgrades, and runs the suite 7 times.
   pg-upgrade-stepwise:
-    needs: [changes]
-    if: needs.changes.outputs.docs_only != 'true'
+    # Gated behind test+lint -- see the comment on pg-upgrade-test's needs.
+    needs: [changes, test, lint]
+    if: success() && needs.changes.outputs.docs_only != 'true'
     name: 🪜 Stepwise pg_upgrade 10 → 18 (from 0.2.0)
     runs-on: ubuntu-latest
     container: pgxn/pgxn-tools
@@ -558,8 +640,9 @@ jobs:
   # sole version where they still load. Complements pg-upgrade-test, which covers
   # the cross-major-version binary upgrade instead.
   extension-update-test:
-    needs: [changes]
-    if: needs.changes.outputs.docs_only != 'true'
+    # Gated behind test+lint -- see the comment on pg-upgrade-test's needs.
+    needs: [changes, test, lint]
+    if: success() && needs.changes.outputs.docs_only != 'true'
     strategy:
       matrix:
         # PG12+: exercise the WIDEST update path we support — CREATE EXTENSION at
@@ -641,8 +724,9 @@ jobs:
         run: bin/test_existing update-scenario cat_tools_update 0.2.2
 
   pg-tle-test:
-    needs: [changes]
-    if: needs.changes.outputs.docs_only != 'true'
+    # Gated behind test+lint -- see the comment on pg-upgrade-test's needs.
+    needs: [changes, test, lint]
+    if: success() && needs.changes.outputs.docs_only != 'true'
     strategy:
       matrix:
         # Current-supported majors, from the single source in the changes job
@@ -768,8 +852,9 @@ jobs:
         run: bin/assert_fs_clean verify ${{ matrix.pg }} /tmp/control_baseline.txt
 
   pg-tle-upgrade-test:
-    needs: [changes]
-    if: needs.changes.outputs.docs_only != 'true'
+    # Gated behind test+lint -- see the comment on pg-upgrade-test's needs.
+    needs: [changes, test, lint]
+    if: success() && needs.changes.outputs.docs_only != 'true'
     strategy:
       matrix:
         include:
@@ -892,7 +977,7 @@ jobs:
   # the heavy jobs gated off by the `changes` job on a docs-only push), and
   # fails if any failed or were cancelled.
   all-checks-passed:
-    needs: [changes, test, lint, pg-upgrade-test, pg-upgrade-stepwise, extension-update-test, pg-tle-test, pg-tle-upgrade-test]
+    needs: [changes, test, lint, verify-cancel-on-close-coupling, pg-upgrade-test, pg-upgrade-stepwise, extension-update-test, pg-tle-test, pg-tle-upgrade-test]
     if: always()
     runs-on: ubuntu-latest
     steps:
