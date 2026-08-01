@@ -257,7 +257,11 @@ run_suite() {
     # override (https://github.com/Postgres-Extensions/pgxntool/issues/55) and
     # use that instead.
     pgtle_destdir=$(mktemp -d)
-    trap 'rm -rf "$pgtle_destdir"' EXIT
+    # Double-quoted so $pgtle_destdir expands NOW, baking the actual path into the
+    # trap as a literal -- the trap then no longer references the variable at all,
+    # so it can't be affected by whatever value (or lack of one) it holds later when
+    # the trap actually fires at EXIT.
+    trap "rm -rf '$pgtle_destdir'" EXIT
     # base.mk's `pgtap` target checks for $(DESTDIR)$(datadir)/extension/pgtap.control
     # but its recipe (`pgxn install pgtap --sudo`) ignores DESTDIR entirely and always
     # installs for real. Against our empty scratch DESTDIR that control file can never
