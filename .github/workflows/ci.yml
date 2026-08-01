@@ -335,6 +335,62 @@ jobs:
       - name: Lint SQL
         run: make lint
 
+  # cancel-on-close.yml cancels in-flight CI/claude-review runs on PR close by
+  # joining the SAME concurrency group strings this workflow and
+  # claude-code-review.yml use -- but it only works because those strings are
+  # hand-copied there, not referenced. No `if: docs_only` gate here on
+  # purpose: this is a near-instant metadata check, not worth ever skipping,
+  # and workflow files aren't "docs" anyway.
+  verify-cancel-on-close-coupling:
+    name: 🔗 Verify cancel-on-close.yml coupling
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v6
+      - name: Confirm ci.yml / claude-code-review.yml still match cancel-on-close.yml's assumptions
+        run: |
+          python3 - <<'PY'
+          import os, sys, yaml
+
+          def load(path):
+              if not os.path.isfile(path):
+                  return None, f"{path} does not exist"
+              with open(path) as f:
+                  return yaml.safe_load(f), None
+
+          errors = []
+
+          ci, err = load('.github/workflows/ci.yml')
+          if err:
+              errors.append(err)
+          else:
+              if ci.get('name') != 'CI':
+                  errors.append(f"ci.yml name is {ci.get('name')!r}, expected 'CI'")
+              ci_group = (ci.get('concurrency') or {}).get('group')
+              expected = "${{ github.workflow }}-${{ github.ref }}"
+              if ci_group != expected:
+                  errors.append(f"ci.yml concurrency.group is {ci_group!r}, expected {expected!r}")
+
+          review, err = load('.github/workflows/claude-code-review.yml')
+          if err:
+              errors.append(err)
+          elif not review.get('jobs', {}).get('claude-review'):
+              errors.append("claude-code-review.yml no longer has a 'claude-review' job")
+          else:
+              review_group = (review.get('concurrency') or {}).get('group')
+              expected = "claude-review-${{ github.event.pull_request.number }}"
+              if review_group != expected:
+                  errors.append(f"claude-code-review.yml concurrency.group is {review_group!r}, expected {expected!r}")
+
+          if errors:
+              print("cancel-on-close.yml's assumptions about ci.yml / claude-code-review.yml no longer hold:")
+              for e in errors:
+                  print(f"  - {e}")
+              print("Update the hardcoded group: strings in .github/workflows/cancel-on-close.yml (or restore the files/fields) to match.")
+              sys.exit(1)
+          print("OK: cancel-on-close.yml's group strings still match ci.yml and claude-code-review.yml.")
+          PY
+
   # Proves cat_tools survives a BINARY pg_upgrade (in-place catalog migration to a
   # newer PostgreSQL major), not just an in-place extension update. Each leg is a
   # SINGLE jump: install an old cat_tools on an old cluster, plant a dependency
@@ -909,7 +965,7 @@ jobs:
   # the heavy jobs gated off by the `changes` job on a docs-only push), and
   # fails if any failed or were cancelled.
   all-checks-passed:
-    needs: [changes, test, lint, pg-upgrade-test, pg-upgrade-stepwise, extension-update-test, pg-tle-test, pg-tle-upgrade-test]
+    needs: [changes, test, lint, verify-cancel-on-close-coupling, pg-upgrade-test, pg-upgrade-stepwise, extension-update-test, pg-tle-test, pg-tle-upgrade-test]
     if: always()
     runs-on: ubuntu-latest
     steps:

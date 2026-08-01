@@ -14,7 +14,9 @@ name: Cancel stale runs on PR close
 # `name:` or its `concurrency.group:` formula, or claude-code-review.yml's
 # `concurrency.group:` formula, ever changes, update the matching string
 # below or cancellation here silently stops matching (no error, it just
-# becomes its own no-op group).
+# becomes its own no-op group). ci.yml's verify-cancel-on-close-coupling job
+# guards this automatically on every push -- it fails CI if those files or
+# fields drift, so this comment is a "why", not the only line of defense.
 on:
   pull_request:
     types: [closed]
