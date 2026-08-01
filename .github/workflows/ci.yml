@@ -352,6 +352,18 @@ jobs:
           python3 - <<'PY'
           import os, sys, yaml
 
+          # GitHub Actions pre-substitutes any expression marker (dollar sign
+          # directly followed by double-open-brace) it finds anywhere in a
+          # run: block's raw text -- including inside this heredoc -- before
+          # the script ever runs, regardless of quoting. D keeps that four-
+          # character sequence from ever appearing contiguously in this file
+          # (not even in this comment -- deliberately not spelled out here),
+          # so the expected strings below stay literal text for Python to
+          # compare against, instead of being evaluated away by Actions
+          # itself (which would make this check compare each expression's
+          # live value against itself -- always "equal", catching nothing).
+          D = "$"
+
           def load(path):
               if not os.path.isfile(path):
                   return None, f"{path} does not exist"
@@ -367,7 +379,7 @@ jobs:
               if ci.get('name') != 'CI':
                   errors.append(f"ci.yml name is {ci.get('name')!r}, expected 'CI'")
               ci_group = (ci.get('concurrency') or {}).get('group')
-              expected = "${{ github.workflow }}-${{ github.ref }}"
+              expected = D + "{{ github.workflow }}-" + D + "{{ github.ref }}"
               if ci_group != expected:
                   errors.append(f"ci.yml concurrency.group is {ci_group!r}, expected {expected!r}")
 
@@ -378,7 +390,7 @@ jobs:
               errors.append("claude-code-review.yml no longer has a 'claude-review' job")
           else:
               review_group = (review.get('concurrency') or {}).get('group')
-              expected = "claude-review-${{ github.event.pull_request.number }}"
+              expected = "claude-review-" + D + "{{ github.event.pull_request.number }}"
               if review_group != expected:
                   errors.append(f"claude-code-review.yml concurrency.group is {review_group!r}, expected {expected!r}")
 
