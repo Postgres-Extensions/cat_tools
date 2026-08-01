@@ -46,7 +46,8 @@
 # --use-existing against a database that already has the extension via pg_tle,
 # so the CREATE-EXTENSION-from-disk side effect that `install` would otherwise
 # produce is never actually exercised, and a scratch DESTDIR keeps the real
-# extension directory untouched. This whole workaround could be simplified
+# extension directory untouched (see run_suite for a related pgtap-specific
+# gotcha with this same DESTDIR). This whole workaround could be simplified
 # away if pgxntool grows a real install-skip override (requested upstream:
 # https://github.com/Postgres-Extensions/pgxntool/issues/55) -- revisit this
 # block if/when that lands. The CALLER is responsible for having already
@@ -255,14 +256,26 @@ run_suite() {
     # TODO: drop this DESTDIR redirect once pgxntool grows a real install-skip
     # override (https://github.com/Postgres-Extensions/pgxntool/issues/55) and
     # use that instead.
-    local pgtle_destdir
     pgtle_destdir=$(mktemp -d)
+    trap 'rm -rf "$pgtle_destdir"' EXIT
+    # base.mk's `pgtap` target checks for $(DESTDIR)$(datadir)/extension/pgtap.control
+    # but its recipe (`pgxn install pgtap --sudo`) ignores DESTDIR entirely and always
+    # installs for real. Against our empty scratch DESTDIR that control file can never
+    # exist, so without this stub Make would consider `pgtap` stale and re-run a real
+    # `pgxn install pgtap --sudo` on every call (network + sudo, and -- more importantly
+    # for this workaround's whole point -- a real write to the actual system extension
+    # directory, since the recipe itself doesn't honor DESTDIR). pgtap is already
+    # installed for real by an earlier CI step in every caller of this mode, so a stub
+    # is all `installcheck`'s prerequisite check needs.
+    local pgtap_destdir
+    pgtap_destdir="$pgtle_destdir$(make -s print-datadir | sed -n 's/.*set to "\(.*\)"$/\1/p')/extension"
+    mkdir -p "$pgtap_destdir"
+    touch "$pgtap_destdir/pgtap.control"
     make testdeps $existing_args
     make installcheck $existing_args DESTDIR="$pgtle_destdir"
     local testout
     testout=$(make -s print-TESTOUT 2>/dev/null | sed -n 's/.*set to "\(.*\)"$/\1/p')
     pgxntool/verify-results-pgtap.sh "$testout"
-    rm -rf "$pgtle_destdir"
   else
     make test $existing_args
     make verify-results $existing_args
