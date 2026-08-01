@@ -91,18 +91,24 @@ include pgxntool/base.mk
 
 ### Phase 1: Meta Generation (`build_meta.sh`)
 - Processes `META.in.json` (template with placeholders/empty values)
-- Strips out X_comment fields and empty values
+- Strips lines with empty string values (this incidentally removes some, but not all, `X_comment` placeholder lines)
 - Produces clean `META.json`
 
-### Phase 2: Variable Extraction (`meta.mk.sh`)
-- Parses `META.json` using `JSON.sh` (a bash-based JSON parser)
+### Phase 2: Distribution Variable Extraction (`meta.mk.sh`)
+- Parses `META.json` (PGXN distribution metadata)
 - Generates `meta.mk` with Make variables:
   - `PGXN` - distribution name
   - `PGXNVERSION` - version number
-  - `EXTENSIONS` - list of extensions provided
-  - `EXTENSION_*_VERSION` - per-extension versions
-  - `EXTENSION__CURRENT_VERSION__FILES` - the current/most-recent auto-generated versioned SQL file for each extension (not all version files)
 - `base.mk` includes `meta.mk` via `-include`
+
+### Phase 3: Extension Variable Extraction (`control.mk.sh`)
+- Parses each `.control` file (what PostgreSQL actually uses), not `META.json`
+- Generates `control.mk` with Make variables and rules:
+  - `EXTENSIONS` - list of extensions provided
+  - `EXTENSION_*_VERSION` - per-extension versions, from each `.control` file's `default_version`
+  - `EXTENSION__CURRENT_VERSION__FILES` - the current/most-recent auto-generated versioned SQL file for each extension (not all version files)
+  - Rules for generating versioned SQL files
+- `base.mk` includes `control.mk` via `-include`
 
 ### The Magic of base.mk
 
@@ -157,10 +163,11 @@ make pgxntool-sync     # Update to latest pgxntool via git subtree pull
 ### Critical Testing Rules
 
 **NEVER use `make installcheck` directly**. Always use `make test` instead. The `make test` target ensures:
-- Clean builds before testing
-- Proper test isolation
-- Correct test dependency installation
-- Proper cleanup and result comparison
+- Correct test dependency installation (`testdeps`, and `test-build` when enabled)
+- Extension is installed before tests run (`install`)
+- Test comparison via `installcheck`, with diffs shown on failure
+
+Note: `make test` intentionally does *not* depend on `clean` — depending on `clean` caused problems with incremental/watch-based builds (see `base.mk`). If your tests need a clean build to pass, that's a sign of a missing dependency elsewhere, not something to fix by adding `clean` back.
 
 **Database Connection Requirement**: PostgreSQL must be running before executing `make test`. If you get connection errors (e.g., "could not connect to server"), stop and ask the user to start PostgreSQL.
 
@@ -204,7 +211,7 @@ When tests fail, examine the diff output carefully. The actual test output in `t
 
 ### Distribution Packaging
 - `make dist` creates `../PGXN-VERSION.zip`
-- Always creates git tag matching version
+- Creates a git tag matching version, unless that tag already exists and points at HEAD (in which case tagging is skipped)
 - Uses `git archive` to package
 - Validates repo is clean before tagging
 
@@ -219,7 +226,7 @@ When tests fail, examine the diff output carefully. The actual test output in `t
 
 pgxntool can generate pg_tle (Trusted Language Extensions) registration SQL for deploying extensions in AWS RDS/Aurora without filesystem access.
 
-**Usage:** `make pgtle` or `make pgtle PGTLE_VERSION=1.5.0+`
+**Usage:** `make pgtle` or `make pgtle PGXNTOOL_PGTLE_VERSION=1.5.0+`
 
 **Output:** `pg_tle/{version_range}/{extension}.sql`
 
@@ -273,11 +280,11 @@ Generated files depend on:
 
 ## Scripts
 
-- **setup.sh** - Initializes pgxntool in a new extension project (copies templates, creates directories)
-- **build_meta.sh** - Strips empty fields from META.in.json to create META.json
-- **meta.mk.sh** - Parses META.json via JSON.sh and generates meta.mk with Make variables
-- **JSON.sh** - Third-party bash JSON parser (MIT licensed)
-- **safesed** - Utility for safe sed operations
+Each script at the top level of this repository (pgxntool/) begins with a shebang followed by a short
+header comment describing its purpose within the first ~10 lines — read that header
+rather than relying on a hand-maintained list here, which would just go stale the same
+way this section itself once did. Exception: trivial third-party or one-line utilities
+may lack such a header.
 
 ## Related Repositories
 

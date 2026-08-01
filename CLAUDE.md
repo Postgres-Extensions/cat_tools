@@ -39,12 +39,17 @@ Never repeat the same comment verbatim in adjacent code — write it once and re
 
 ## References to PRs and issues in committed files
 
-Any reference to a GitHub PR or issue inside a **committed file** (SQL/code comments,
+A reference to a GitHub PR or issue inside a **committed file** (SQL/code comments,
 `.github/workflows/ci.yml` comments, `CLAUDE.md`, `test/install/load.sql`, docs) MUST be a
 full URL, e.g. `https://github.com/Postgres-Extensions/cat_tools/issues/28` — never a bare
-`#28` (a bare number is meaningless when the file is read outside GitHub). Referencing by
-number is fine only in GitHub-native text (PR/issue titles and descriptions, review
-comments).
+`#28` (a bare number is meaningless when the file is read outside GitHub), **if it's
+something a reader might still need to act on or look up** — an open TODO, a workaround to
+revisit once some other issue lands, a known limitation. For a reference that's purely
+historical context (explaining why past code looks the way it does, where the issue is
+already resolved and there's nothing left to do), a bare `#28` is fine — readers are less
+likely to need to chase it down, and it's less noise. When in doubt, use the full URL.
+Referencing by number is always fine in GitHub-native text (PR/issue titles and
+descriptions, review comments).
 
 ## Pull request descriptions
 

@@ -475,6 +475,7 @@ body.book #toc,body.book #preamble,body.book h1.sect0,body.book .sect1>h2{page-b
 <li><a href="#_alternative_ignoring_all_version_files">5.5. Alternative: Ignoring All Version Files</a></li>
 <li><a href="#_distribution_inclusion">5.6. Distribution Inclusion</a></li>
 <li><a href="#_multiple_versions">5.7. Multiple Versions</a></li>
+<li><a href="#_gotchas">5.8. Gotchas</a></li>
 </ul>
 </li>
 <li><a href="#_document_handling">6. Document Handling</a>
@@ -499,7 +500,7 @@ body.book #toc,body.book #preamble,body.book h1.sect0,body.book .sect1>h2{page-b
 <ul class="sectlevel2">
 <li><a href="#_pgxn_remote">8.1. PGXN_REMOTE</a></li>
 <li><a href="#_asciidoc">8.2. ASCIIDOC</a></li>
-<li><a href="#_pgtle_version">8.3. PGTLE_VERSION</a></li>
+<li><a href="#_pgxntool_pgtle_version">8.3. PGXNTOOL_PGTLE_VERSION</a></li>
 <li><a href="#_pg_config">8.4. PG_CONFIG</a></li>
 <li><a href="#_testdir">8.5. TESTDIR</a></li>
 <li><a href="#_testout">8.6. TESTOUT</a></li>
@@ -1198,11 +1199,11 @@ PGXS doesn&#8217;t provide any special support for <code>distclean</code> — it
 <p><code>make pgtle</code> generates SQL files in <code>pg_tle/</code> subdirectories organized by pg_tle version ranges. For version range details, see <code>pgtle_versions.md</code>.</p>
 </div>
 <div class="paragraph">
-<p>Set <code>PGTLE_VERSION</code> on the command line to limit generation to the single version range that value falls into, instead of every known range:</p>
+<p>Set <code>PGXNTOOL_PGTLE_VERSION</code> on the command line to limit generation to the single version range that value falls into, instead of every known range:</p>
 </div>
 <div class="listingblock">
 <div class="content">
-<pre>make pgtle PGTLE_VERSION=1.5.0</pre>
+<pre>make pgtle PGXNTOOL_PGTLE_VERSION=1.5.0</pre>
 </div>
 </div>
 </div>
@@ -1479,6 +1480,34 @@ If you ignore version files instead of committing them, they will NOT be include
 </div>
 <div class="paragraph">
 <p>The version file for the current version (specified in the <code>.control</code> file&#8217;s <code>default_version</code>) will be automatically regenerated when you run <code>make</code>, but other version files you create manually will be preserved.</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_gotchas"><a class="anchor" href="#_gotchas"></a><a class="link" href="#_gotchas">5.8. Gotchas</a></h3>
+<div class="sect3">
+<h4 id="_generated_sql_files_can_be_missed_on_a_clean_build"><a class="anchor" href="#_generated_sql_files_can_be_missed_on_a_clean_build"></a><a class="link" href="#_generated_sql_files_can_be_missed_on_a_clean_build">5.8.1. Generated SQL Files Can Be Missed on a Clean Build</a></h4>
+<div class="paragraph">
+<p><code>DATA</code> (the PGXS variable controlling what <code>make install</code> actually installs) is seeded by pgxntool with <code>$(wildcard sql/<strong>--</strong>.sql)</code>, so PGXS installs whatever version-specific and upgrade files exist under <code>sql/</code> when <code>DATA</code> is evaluated.</p>
+</div>
+<div class="paragraph">
+<p>If your extension <strong>generates</strong> its versioned SQL from another source (e.g. a <code>.sql.in</code> template expanded by a custom rule) and gitignores the generated <code>.sql</code>, a clean <code>make install</code> (or <code>make test</code>, <code>make all install</code> in one invocation) can silently omit files that were only just generated during that same run. This isn&#8217;t a pattern-matching problem — the glob is correct — it&#8217;s a GNU Make quirk: <code>wildcard</code> caches a directory&#8217;s contents internally for the life of one <code>make</code> invocation, and that cache isn&#8217;t invalidated just because a recipe created new files earlier in the same run. So even though <code>DATA</code> is a recursively-expanded variable (re-evaluated each time it&#8217;s referenced), re-referencing it later in the same invocation can still see the stale, pre-generation listing.</p>
+</div>
+<div class="paragraph">
+<p>Workarounds:</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p>Run generation and install as separate <code>make</code> invocations (e.g. <code>make &amp;&amp; make install</code>) so the second invocation&#8217;s parse-time wildcard scan sees files the first invocation created.</p>
+</li>
+<li>
+<p>List the generated files in <code>DATA</code> explicitly, keyed off stable names derived from your <code>.sql.in</code> sources (known at parse time) rather than relying on <code>wildcard</code> to discover the generated <code>.sql</code> output.</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>Tracked as <a href="https://github.com/Postgres-Extensions/pgxntool/issues/44">issue #44</a> — pgxntool doesn&#8217;t yet have first-class support for generated versioned SQL; the ideas under discussion there (e.g. a dedicated generated-output directory pgxntool builds before installing) are a bigger design change than a one-line fix.</p>
+</div>
 </div>
 </div>
 </div>
@@ -1858,9 +1887,9 @@ Variables marked with <code>*</code> must be set to exactly <code>yes</code> or 
 </div>
 </div>
 <div class="sect2">
-<h3 id="_pgtle_version"><a class="anchor" href="#_pgtle_version"></a><a class="link" href="#_pgtle_version">8.3. PGTLE_VERSION</a></h3>
+<h3 id="_pgxntool_pgtle_version"><a class="anchor" href="#_pgxntool_pgtle_version"></a><a class="link" href="#_pgxntool_pgtle_version">8.3. PGXNTOOL_PGTLE_VERSION</a></h3>
 <div class="paragraph">
-<p>Default: unset (generates every known pg_tle version range). Set on the command line to limit <code>make pgtle</code> to the single version range this value falls into. See <a href="#_pgtle">pgtle</a>.</p>
+<p>Default: unset (generates every known pg_tle version range). Set on the command line to limit <code>make pgtle</code> to the single version range this value falls into. Not named <code>PGTLE_VERSION</code>: make auto-imports same-named environment variables, and that name collided silently with CI jobs that set a <code>PGTLE_VERSION</code> env var for an unrelated purpose (which pg_tle to test against). See <a href="#_pgtle">pgtle</a>.</p>
 </div>
 </div>
 <div class="sect2">
@@ -1954,7 +1983,7 @@ Variables marked with <code>*</code> must be set to exactly <code>yes</code> or 
 </div>
 <div id="footer">
 <div id="footer-text">
-Last updated 2026-07-29 14:55:58 -0500
+Last updated 2026-07-31 16:13:06 -0500
 </div>
 </div>
 </body>
