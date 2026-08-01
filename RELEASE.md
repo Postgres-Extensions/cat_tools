@@ -84,10 +84,11 @@ what that version actually shipped.
 
 ## 6. Tag and distribute
 
-> **⚠️ Pass `PGXN_REMOTE=upstream` to every target below if your clone's `origin`
-> is a personal fork** (as it typically is for a maintainer working from a fork
-> with the canonical repo configured as a separate `upstream` remote). Without
-> it, `tag`/`rmtag`/`forcetag`/`dist` push to `origin` by default — silently
+> **⚠️ Pass `PGXN_REMOTE=<remote>` to every target below if your clone's `origin`
+> is a personal fork** (as it typically is for a maintainer working from a fork,
+> with the canonical repo configured under some other remote name — check
+> `git remote -v` rather than assuming it's called `upstream`). Without it,
+> `tag`/`rmtag`/`forcetag`/`dist` push to `origin` by default — silently
 > tagging the fork instead of `Postgres-Extensions/cat_tools`. This is exactly
 > what happened when the 0.2.3 release tag was first cut and had to be
 > re-pointed by hand; pgxntool 2.2.0 added `PGXN_REMOTE` specifically to fix
