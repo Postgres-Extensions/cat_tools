@@ -26,18 +26,13 @@ on:
     types: [opened, synchronize, reopened, ready_for_review, labeled]
 
 concurrency:
-  # BUG (found by claude-review itself, PR #64 review comment): concurrency
-  # cancellation is resolved when the run is admitted, BEFORE the job's `if:`
-  # is ever evaluated -- a job's `if:` can only no-op that job, it can't
-  # un-cancel whatever the run's mere existence already displaced. Since
-  # `labeled` is now a trigger type (see the `on:` comment above), a group
-  # keyed only on PR number meant ANY label -- not just claude-debug -- would
-  # admit a new run here, cancelling a real in-progress review with nothing
-  # to replace it (the new run's job then no-ops via its `if:`, too late).
-  # Fix: only a labeled event whose label is NOT claude-debug gets its own
-  # per-label group, so it can never collide with (and thus never cancel)
-  # the real review's group. A labeled+claude-debug event deliberately keeps
-  # the plain group -- it's meant to supersede an in-progress real review.
+  # Concurrency cancellation resolves when a run is admitted, before the
+  # job's `if:` is evaluated -- a job's `if:` can only no-op itself, it can't
+  # un-cancel whatever the run already displaced. So only a labeled event
+  # whose label is NOT claude-debug gets its own per-label group here,
+  # keeping it from ever colliding with (and cancelling) the real review's
+  # group. labeled+claude-debug deliberately keeps the plain group, since
+  # it's meant to supersede an in-progress review.
   group: claude-review-${{ github.event.pull_request.number }}${{ (github.event.action == 'labeled' && github.event.label.name != 'claude-debug') && format('-{0}', github.event.label.name) || '' }}
   cancel-in-progress: true
 
@@ -87,7 +82,7 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
         run: |
           enabled=$(gh pr view "$PR" --repo "$REPO" --json labels \
-                      --jq 'any(.labels[]; .name == "claude-debug")')
+                      --jq 'any(.labels[]; .name == "claude-debug")' 2>/dev/null) || enabled=false
           echo "enabled=$enabled" >> "$GITHUB_OUTPUT"
           echo "claude-debug label present: $enabled"
 
