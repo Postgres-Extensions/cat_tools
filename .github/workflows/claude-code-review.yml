@@ -18,10 +18,22 @@ name: Claude Code Review
 # breaks that fetch with "couldn't find remote ref pull/<N>/head".
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened, ready_for_review]
+    # labeled: lets adding the claude-debug label (see the "Check for
+    # claude-debug label" step below) kick off a fresh run by itself, with no
+    # push/re-run needed. Scoped in the job's `if:` below to only actually
+    # proceed when the label added IS claude-debug -- otherwise every
+    # unrelated label added to a PR would trigger another paid review.
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
 
 concurrency:
-  group: claude-review-${{ github.event.pull_request.number }}
+  # Concurrency cancellation resolves when a run is admitted, before the
+  # job's `if:` is evaluated -- a job's `if:` can only no-op itself, it can't
+  # un-cancel whatever the run already displaced. So only a labeled event
+  # whose label is NOT claude-debug gets its own per-label group here,
+  # keeping it from ever colliding with (and cancelling) the real review's
+  # group. labeled+claude-debug deliberately keeps the plain group, since
+  # it's meant to supersede an in-progress review.
+  group: claude-review-${{ github.event.pull_request.number }}${{ (github.event.action == 'labeled' && github.event.label.name != 'claude-debug') && format('-{0}', github.event.label.name) || '' }}
   cancel-in-progress: true
 
 jobs:
@@ -36,7 +48,8 @@ jobs:
     # whether this job should keep running on arbitrary forks.
     if: >-
       github.event.pull_request.draft == false &&
-      github.event.pull_request.head.repo.owner.login == 'jnasbyupgrade'
+      github.event.pull_request.head.repo.owner.login == 'jnasbyupgrade' &&
+      (github.event.action != 'labeled' || github.event.label.name == 'claude-debug')
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
@@ -51,6 +64,28 @@ jobs:
       # existing trusted-fork-owner gate below, not instead of it.
       actions: write
     steps:
+      # DEBUG MODE: add the "claude-debug" label to a PR to (a) skip the cost
+      # gate below entirely -- a debug session shouldn't wait 5-20+ min per
+      # iteration on sibling CI -- and (b) get show_full_output: true on the
+      # Run Claude Code Review step, dumping the full raw Claude Code JSON
+      # transcript (including tool results -- see that input's own WARNING
+      # below) to the job log. This is how you'd catch something like a
+      # silently-swallowed `--comment` flag (see that step's other comment).
+      # Queried live via `gh pr view`, not the static event payload, so
+      # adding the label and clicking "Re-run jobs" on an existing run picks
+      # it up without needing a new push.
+      - name: Check for claude-debug label
+        id: debug
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          enabled=$(gh pr view "$PR" --repo "$REPO" --json labels \
+                      --jq 'any(.labels[]; .name == "claude-debug")' 2>/dev/null) || enabled=false
+          echo "enabled=$enabled" >> "$GITHUB_OUTPUT"
+          echo "claude-debug label present: $enabled"
+
       # COST GATE: the paid Claude review is the last thing to run. Wait for the
       # PR head's OTHER check-runs to finish and only proceed if they are clean.
       # If any sibling check failed we skip the review to avoid spending money
@@ -66,6 +101,7 @@ jobs:
       # gate never waits on or fails because of itself.
       - name: Wait for CI; skip the paid review if any check failed
         id: gate
+        if: steps.debug.outputs.enabled != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
@@ -93,7 +129,7 @@ jobs:
           echo "gate decision: $decision"
 
       - name: Check out base branch
-        if: steps.gate.outputs.decision == 'run'
+        if: steps.debug.outputs.enabled == 'true' || steps.gate.outputs.decision == 'run'
         # Intentionally tracks the major-version tag (not a pinned SHA) so
         # upstream fixes are picked up automatically.
         #
@@ -107,10 +143,15 @@ jobs:
           persist-credentials: false
 
       - name: Run Claude Code Review
-        if: steps.gate.outputs.decision == 'run'
+        if: steps.debug.outputs.enabled == 'true' || steps.gate.outputs.decision == 'run'
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # See the "Check for claude-debug label" step above -- WARNING (from
+          # this input's own description): outputs ALL Claude messages
+          # including tool execution results, which may contain secrets, and
+          # these logs are publicly visible in GitHub Actions.
+          show_full_output: ${{ steps.debug.outputs.enabled == 'true' }}
           # Provide github_token so the action uses it directly for GitHub API
           # calls instead of the OIDC->GitHub-App-token exchange, which 401s under
           # pull_request_target. GITHUB_TOKEN is repo/workflow-scoped (independent

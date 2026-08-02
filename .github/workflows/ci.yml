@@ -393,7 +393,11 @@ jobs:
               errors.append("claude-code-review.yml no longer has a 'claude-review' job")
           else:
               review_group = (review.get('concurrency') or {}).get('group')
-              expected = "claude-review-" + D + "{{ github.event.pull_request.number }}"
+              expected = (
+                  "claude-review-" + D + "{{ github.event.pull_request.number }}"
+                  + D + "{{ (github.event.action == 'labeled' && github.event.label.name != 'claude-debug')"
+                  + " && format('-{0}', github.event.label.name) || '' }}"
+              )
               if review_group != expected:
                   errors.append(f"claude-code-review.yml concurrency.group is {review_group!r}, expected {expected!r}")
 
