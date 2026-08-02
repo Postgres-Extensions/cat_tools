@@ -101,6 +101,12 @@ SELECT __cat_tools.create_function(
   , 'pg_catalog.regprocedure LANGUAGE plpgsql'
   , $body$
 DECLARE
+  /*
+   * Template for creating a temporary function with the user-provided argument
+   * signature. This allows us to leverage PostgreSQL's parser to validate and
+   * extract argument information without permanently creating a function.
+   * Using plpgsql language for the temp function to handle any return type.
+   */
   c_template CONSTANT text := $fmt$CREATE FUNCTION pg_temp.cat_tools__function__%s__temp_function(
     %s
   ) RETURNS %s LANGUAGE plpgsql AS 'BEGIN RETURN; END'
@@ -109,9 +115,13 @@ DECLARE
   temp_proc pg_catalog.regprocedure;
   sql text;
 BEGIN
+  /*
+   * Security check: Ensure current_user == session_user to detect SECURITY DEFINER context
+   * This prevents SQL injection attacks through elevated privileges.
+   */
   IF current_user != session_user THEN
     RAISE EXCEPTION USING
-      ERRCODE = '28000'
+      ERRCODE = '28000' -- invalid_authorization_specification
       , MESSAGE = 'potential use of SECURITY DEFINER detected'
       , DETAIL = format('current_user is %s, session_user is %s', current_user, session_user)
       , HINT = 'Helper functions must not be called from SECURITY DEFINER context.';
@@ -122,6 +132,7 @@ BEGIN
     , arguments
     , 'void'
   );
+  --RAISE DEBUG 'Executing SQL %', sql;
   DECLARE
     v_type pg_catalog.regtype;
   BEGIN
@@ -137,6 +148,12 @@ BEGIN
     EXECUTE sql;
   END;
 
+  /*
+   * Get new OID. *This must be done dynamically!* Otherwise we get stuck
+   * with a CONST oid after first compilation. The regproc cast ensures there's
+   * only one function with this name. The cast to regprocedure is for the sake
+   * of the DROP down below.
+   */
   EXECUTE format(
     $$SELECT 'pg_temp.cat_tools__function__%s__temp_function'::pg_catalog.regproc::pg_catalog.regprocedure$$
     , function_suffix
@@ -155,9 +172,13 @@ SELECT __cat_tools.create_function(
   , 'void LANGUAGE plpgsql'
   , $body$
 BEGIN
+  /*
+   * Security check: Ensure current_user == session_user to detect SECURITY DEFINER context
+   * This prevents SQL injection attacks through elevated privileges.
+   */
   IF current_user != session_user THEN
     RAISE EXCEPTION USING
-      ERRCODE = '28000'
+      ERRCODE = '28000' -- invalid_authorization_specification
       , MESSAGE = 'potential use of SECURITY DEFINER detected'
       , DETAIL = format('API function %s must not be called from a SECURITY DEFINER function', api_function_name)
       , HINT = 'We detect SECURITY DEFINER context by comparing current_user and session_user, which can cause false positives if SET ROLE is used';
@@ -429,6 +450,7 @@ SELECT __cat_tools.create_function(
 SELECT
   CASE
     WHEN proargnames IS NULL THEN
+      -- No named arguments, return array of NULLs matching proargtypes length
       CASE
         WHEN pronargs > 0 THEN
           array_fill(NULL::text, ARRAY[pronargs])
@@ -436,11 +458,13 @@ SELECT
           '{}'::text[]
       END
     WHEN proargmodes IS NULL THEN
+      -- All arguments are IN mode, proargnames and proargtypes align
       array(
         SELECT CASE WHEN name = '' THEN NULL ELSE name END
         FROM unnest(proargnames) AS name
       )
     ELSE
+      -- Mixed argument modes, need to filter names to match proargtypes
       array(
         SELECT
           CASE
@@ -493,7 +517,10 @@ DECLARE
   result pg_catalog.regtype[];
 BEGIN
   result := cat_tools.routine__arg_types(c_temp_proc);
+
+  -- Clean up the temporary function
   PERFORM _cat_tools.function__drop_temp(c_temp_proc, 'cat_tools.routine__parse_arg_types');
+
   RETURN result;
 END
 $body$
@@ -514,7 +541,10 @@ DECLARE
   result text[];
 BEGIN
   result := cat_tools.routine__arg_names(c_temp_proc);
+
+  -- Clean up the temporary function
   PERFORM _cat_tools.function__drop_temp(c_temp_proc, 'cat_tools.routine__parse_arg_names');
+
   RETURN result;
 END
 $body$
@@ -560,6 +590,7 @@ SELECT __cat_tools.create_function(
   , $body$
 BEGIN
   RAISE WARNING 'function__arg_types() is deprecated, use routine__parse_arg_types instead';
+
   RETURN cat_tools.routine__parse_arg_types(arguments);
 END
 $body$
@@ -577,6 +608,7 @@ SELECT __cat_tools.create_function(
   , $body$
 BEGIN
   RAISE WARNING 'function__arg_types_text() is deprecated, use routine__parse_arg_types_text instead';
+
   RETURN cat_tools.routine__parse_arg_types_text(arguments);
 END
 $body$
@@ -639,6 +671,7 @@ SELECT (
     WHEN object_type::text LIKE '% column'
       THEN 'pg_attribute'
     ELSE CASE object_type
+      -- Unusual cases
       WHEN 'default value' THEN 'pg_attrdef'
       WHEN 'large object' THEN 'pg_largeobject'
       WHEN 'operator class' THEN 'pg_opclass'
@@ -656,7 +689,7 @@ SELECT (
       WHEN 'server' THEN 'pg_foreign_server'
       WHEN 'user mapping' THEN 'pg_user_mapping'
       WHEN 'default acl' THEN 'pg_default_acl'
-      WHEN 'event trigger' THEN 'pg_event_trigger'
+      WHEN 'event trigger' THEN 'pg_event_trigger' -- SED: REQUIRES 9.3!
       WHEN 'access method' THEN 'pg_am'
       ELSE 'pg_' || object_type::text
       END
@@ -692,7 +725,7 @@ SELECT __cat_tools.create_function(
   , $$boolean LANGUAGE sql STRICT STABLE$$
   , $body$
 SELECT relnamespace::pg_catalog.regnamespace::text ~ '^pg_temp'
-FROM pg_catalog.pg_class
+FROM pg_catalog.pg_class 
 WHERE oid = $1
 $body$
   , 'cat_tools__usage'
@@ -706,7 +739,7 @@ SELECT __cat_tools.create_function(
   , $$boolean LANGUAGE sql STRICT STABLE$$
   , $body$
 SELECT relnamespace::pg_catalog.regnamespace::text = 'pg_catalog'
-FROM pg_catalog.pg_class
+FROM pg_catalog.pg_class 
 WHERE oid = $1
 $body$
   , 'cat_tools__usage'
@@ -806,18 +839,19 @@ BEGIN
   END IF;
   RAISE DEBUG 'v_work "%"', v_work;
 
-  -- Get function arguments
-  -- Use a generic pattern rather than the regproc name, since pg_get_triggerdef
-  -- may render temp functions as "pg_temp.f" while ::regproc gives "pg_temp_N.f".
-  v_execute_clause := E' EXECUTE (FUNCTION|PROCEDURE) \\S+\\(';
+  /*
+   * Get function arguments. PG11+ uses "EXECUTE FUNCTION"; older versions use
+   * "EXECUTE PROCEDURE". Note: ::regproc returns the internal pg_temp_N schema
+   * name while pg_get_triggerdef uses the pg_temp alias, so we match on EXECUTE
+   * PROCEDURE/FUNCTION + any non-space chars (the function name) rather than the
+   * specific function name.
+   */
+  v_execute_clause := E' EXECUTE (?:PROCEDURE|FUNCTION) \\S+\\(';
   v_array := regexp_split_to_array( v_work, v_execute_clause );
-  EXECUTE format(
-      CASE WHEN coalesce( rtrim( v_array[2], ')' ), '' ) = ''
-        THEN 'SELECT ARRAY[]::text[]'
-        ELSE 'SELECT array[ %s ]'
-      END
-      , rtrim( v_array[2], ')' ) -- Yank trailing )
-    )
+  EXECUTE CASE
+      WHEN trim(rtrim(v_array[2], ')')) = '' THEN 'SELECT ARRAY[]::text[]'
+      ELSE format('SELECT array[ %s ]', rtrim( v_array[2], ')' ))
+    END
     INTO function_arguments
   ;
   RAISE DEBUG 'v_array[2] "%"', v_array[2];
@@ -868,3 +902,24 @@ DROP FUNCTION __cat_tools.create_function(
   , comment text
 );
 DROP SCHEMA __cat_tools;
+
+/*
+ * Converge the ACL of the five enum types that predate 0.2.2 (constraint_type,
+ * procedure_type, relation_type, relation_relkind, object_type) to the
+ * fresh-install state. ALTER DEFAULT PRIVILEGES (near the top of
+ * sql/cat_tools.sql.in) only applies to objects created AFTER it runs; these
+ * types were created back in 0.2.0/0.2.1, so the 0.2.0->0.2.2 and 0.2.1->0.2.2
+ * update scripts never granted USAGE on them, and neither does 0.2.2->0.2.3 --
+ * a 0.2.0/0.2.1-origin database is still missing the grant on reaching 0.2.3.
+ * Both already-released scripts are immutable, so the fix converges forward
+ * here instead, on the first still-unpublished update script downstream of the
+ * gap. A fresh install at any version creates these types AFTER the statement
+ * and already has the grant, so GRANT's idempotency makes this a no-op there.
+ */
+GRANT USAGE ON TYPE
+  cat_tools.constraint_type
+  , cat_tools.procedure_type
+  , cat_tools.relation_type
+  , cat_tools.relation_relkind
+  , cat_tools.object_type
+  TO cat_tools__usage;
