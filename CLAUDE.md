@@ -37,6 +37,10 @@ Never repeat the same comment verbatim in adjacent code — write it once and re
 
 **Always open PRs against the main repo** (`Postgres-Extensions/cat_tools`), not a fork.
 
+**Prefix with `CI: `** any commit/PR subject whose change affects ONLY CI (workflow files,
+CI-only scripts) and does not touch the main test suite/build. A change that also touches the
+test suite/build does not get the prefix, even if CI-related.
+
 ## References to PRs and issues in committed files
 
 Any reference to a GitHub PR or issue inside a **committed file** (SQL/code comments,
