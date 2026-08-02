@@ -50,22 +50,16 @@ versioned_out = $(subst .sql.in,.sql,$(versioned_in))
 upgrade_scripts_out = $(subst .sql.in,.sql,$(wildcard sql/*--*--*.sql.in))
 
 #
-# Historical install scripts committed directly as .sql with no .sql.in (the
-# frozen cat_tools--0.1.* set; see sql/.gitignore). Globbing committed files is
-# safe. Derive rather than hardcode: take every install-shaped .sql, then drop
-# the update scripts and everything we generate from .sql.in. Parse-stable (the
-# subtracted names are name-derived), and picks up new historical files auto.
-historical_installs = $(filter-out $(versioned_out) $(wildcard sql/*--*--*.sql), $(wildcard sql/*--*.sql))
-
-#
 # DATA -- the INSTALL manifest: what `make install` copies into the extension
 # dir. Installed != committed. The versioned .sql (install and update scripts)
 # are BUILT from the committed .sql.in at build time and installed, but are
 # gitignored, not tracked -- only the .sql.in are. The historical
-# cat_tools--0.1.*.sql are the exception: committed directly (no .sql.in source).
-# base.mk only seeds DATA; we append here.
+# cat_tools--0.1.*.sql are the exception: committed directly (no .sql.in source),
+# so they're always present at Make's parse time regardless of build state --
+# base.mk's own DATA wildcard (sql/*--*.sql, widened in pgxntool 2.3.0 to match
+# both dash counts) already picks them up on its own; we don't need to add them
+# again. base.mk only seeds DATA; we append here.
 #
-DATA += $(historical_installs)
 # Generated install scripts, minus the current-version file
 # (EXTENSION__CURRENT_VERSION__FILES, from control.mk) and the update scripts.
 DATA += $(filter-out $(EXTENSION__CURRENT_VERSION__FILES) $(upgrade_scripts_out), $(versioned_out))
