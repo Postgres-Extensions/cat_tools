@@ -83,14 +83,25 @@ what that version actually shipped.
       any omitted generated install script is regenerated on the consumer's side.)
 
 ## 6. Tag and distribute
+
+> **⚠️ Pass `PGXN_REMOTE=<remote>` to every target below if your clone's `origin`
+> is a personal fork** (as it typically is for a maintainer working from a fork,
+> with the canonical repo configured under some other remote name — check
+> `git remote -v` rather than assuming it's called `upstream`). Without it,
+> `tag`/`rmtag`/`forcetag`/`dist` push to `origin` by default — silently
+> tagging the fork instead of `Postgres-Extensions/cat_tools`. This is exactly
+> what happened when the 0.2.3 release tag was first cut and had to be
+> re-pointed by hand; pgxntool 2.2.0 added `PGXN_REMOTE` specifically to fix
+> this (https://github.com/Postgres-Extensions/pgxntool/issues/53).
+
 - [ ] Commit the release changes; working tree must be clean — `make tag` aborts with
       "Untracked changes!" on a dirty tree.
 - [ ] `make tag` — creates a git tag named exactly the version, UNPREFIXED (e.g. `0.2.3`,
       matching the existing `0.2.2` tag; no `v` prefix), taken from `PGXNVERSION`, and
-      pushes it to `origin`. It is idempotent when the tag already points at HEAD, and
-      errors if the tag exists on a different commit. To move an existing tag use
-      `make forcetag` (= `make rmtag` then `make tag`); `make rmtag` deletes the tag
-      locally and on `origin`.
+      pushes it to `$(PGXN_REMOTE)` (default `origin`). It is idempotent when the tag
+      already points at HEAD, and errors if the tag exists on a different commit. To
+      move an existing tag use `make forcetag` (= `make rmtag` then `make tag`);
+      `make rmtag` deletes the tag locally and on `$(PGXN_REMOTE)`.
 - [ ] `make dist` — depends on `tag` (and builds the HTML docs), then
       `git archive`s the tag into `../cat_tools-<version>.zip` (parent directory).
       Because it archives the tag, only committed files are included. If a `.gitattributes`
