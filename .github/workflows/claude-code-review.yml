@@ -116,6 +116,12 @@ jobs:
           # pull_request_target. GITHUB_TOKEN is repo/workflow-scoped (independent
           # of the actor's role) and has pull-requests: write here.
           github_token: ${{ secrets.GITHUB_TOKEN }}
+          # A `prompt:` input puts the action in "automation mode", which by
+          # default posts nothing until the whole run finishes -- there's no
+          # visibility into a review that runs long. track_progress forces a
+          # tracking PR comment with a live checklist that updates as Claude
+          # works, so a slow run is visible instead of silent.
+          track_progress: true
           # NOTE: plugin_marketplaces can't be pinned — it tracks the
           # marketplace repo's default branch (upstream anthropics/claude-code).
           plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
