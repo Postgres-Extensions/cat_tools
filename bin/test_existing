@@ -28,10 +28,31 @@
 #
 #   update-scenario DB FROM_VERSION
 #       Create DB + extension at FROM_VERSION, plant guard, update to current,
-#       run the suite against that real updated database.
+#       structurally compare against a fresh install of current (see
+#       diff-fresh), run the suite against that real updated database.
 #
 #   update-check DB FROM_VERSION TO_VERSION
-#       Lightweight check that a specific update script applies (no suite).
+#       Lightweight check that a specific update script applies (no suite),
+#       then structurally compare against a fresh install of TO_VERSION (see
+#       diff-fresh).
+#
+#   update-check-version DB FROM_VERSION TO_VERSION
+#       Same as update-check but WITHOUT the structural comparison: for a
+#       landing point pinned at an already-tagged version, where a fresh-
+#       install divergence is documented and can only converge forward into a
+#       LATER, still-unpublished update script (an already-published
+#       version-specific file is never retroactively edited). Only asserts the
+#       version landed.
+#
+#   diff-fresh DB VERSION
+#       Structurally compare DB's cat_tools objects against a throwaway fresh
+#       install of VERSION (function/view definitions, type labels, comments,
+#       ACLs, extension membership -- see bin/structural_diff.sql). Fails loudly
+#       on any nonempty diff. Generalizes a manual comparison that found the
+#       trigger__parse divergence fixed by
+#       https://github.com/Postgres-Extensions/cat_tools/pull/46; update-scenario
+#       and update-check both call this automatically, but it's also directly
+#       useful standalone against any already-populated database.
 #
 # Run `bin/test_existing` with no subcommand to print usage.
 #
@@ -170,6 +191,30 @@ update_ext() {
   psql_do "$db" -c "ALTER EXTENSION cat_tools UPDATE $to"
 }
 
+# Structurally compare DB's cat_tools objects (function/view definitions, type
+# labels, comments, ACLs, extension membership -- see bin/structural_diff.sql)
+# against a FRESH install of VERSION. An update script only really "supports"
+# a version if updating to it reaches the SAME objects a fresh install would;
+# https://github.com/Postgres-Extensions/cat_tools/pull/46 found a real
+# divergence this way by hand (a pre-0.2.2 update script's trigger__parse body
+# didn't match the fresh-install body, breaking every trigger parse on
+# PG11+). Runs in a subshell so the EXIT trap dropping the throwaway reference
+# database is scoped to this call, not the whole script (see the same pattern,
+# and why it must be a subshell rather than a plain function-local trap, in
+# bin/structural_diff's compare()).
+assert_matches_fresh() {
+  local db=$1 version=$2
+  # Separate statement: a self-referencing `local a=1 b=$a` is bash-version-
+  # dependent on whether $a is visible yet while computing b's value.
+  local fresh_db="${db}__fresh_ref"
+  (
+    trap 'dropdb --if-exists "$fresh_db"' EXIT
+    createdb "$fresh_db"
+    psql_do "$fresh_db" -c "CREATE EXTENSION cat_tools VERSION '$version'"
+    bin/structural_diff compare "$db" "$fresh_db"
+  )
+}
+
 # ---------------------------------------------------------------------------
 # Subcommand implementations
 # ---------------------------------------------------------------------------
@@ -200,26 +245,69 @@ prepare_old() {
 # update-scenario DB FROM_VERSION
 #   Full extension-update flow that runs the existing-mode suite: create the DB
 #   and extension at FROM_VERSION, plant + prove the guard, update to the current
-#   version, then run the suite against that real updated database.
+#   version, structurally compare the result against a fresh install of the
+#   current version (assert_matches_fresh), then run the suite against that
+#   real updated database.
 update_scenario() {
   local db=$1 from=$2
   createdb "$db"
   psql_do "$db" -c "CREATE EXTENSION cat_tools VERSION '$from'"
   plant_guard "$db"
   update_ext "$db"
+  assert_matches_fresh "$db" "$(current_version)"
   run_suite "$db"
 }
 
-# update-check DB FROM_VERSION TO_VERSION
-#   Lightweight check that a specific update script applies (no suite): used for
-#   the pre-0.2.2 scripts, which only install on PG10 and target 0.2.2 (not the
-#   current version, so the suite cannot run against them).
-update_check() {
+# update-check-version DB FROM_VERSION TO_VERSION
+#   Lightweight check that a specific update script applies (no suite): used
+#   for the pre-0.2.2 scripts, which only install on PG10 and target 0.2.2 (not
+#   the current version, so the suite cannot run against them). Also used for
+#   ANY update path landing on 0.2.3, regardless of origin -- 0.2.3 is itself
+#   already tagged/published, and a version-specific file is NEVER edited once
+#   tagged (CLAUDE.md's SQL file conventions rule 5), so a divergence at that
+#   landing point can never be repaired in place; the fix has to converge
+#   forward into 0.2.3->0.3.0 instead, the same way PR #46 converged its own
+#   fix forward into 0.2.2->0.2.3 rather than editing 0.2.0/0.2.1's already-
+#   published scripts. Two such divergences exist for 0.2.3: a comment-only
+#   drift between the frozen sql/cat_tools--0.2.3.sql.in fresh-install script
+#   (never got PR #46's comment tweaks) and the 0.2.2->0.2.3 update script
+#   (which did) affects EVERY origin, including a fresh 0.2.2; a type-ACL gap
+#   on five enum types predating 0.2.2 affects only a 0.2.0/0.2.1 origin
+#   (0.2.2->0.2.3 never grants it, since a fresh 0.2.2 already has it and so
+#   never needed the grant added there). Either way, asserting fresh-parity at
+#   a landing point pinned to an already-tagged version fails forever by
+#   design, not from a regression -- see update-check's comment for the
+#   version where full parity IS expected and proven.
+update_check_version() {
   local db=$1 from=$2 to=$3
   createdb "$db"
   psql_do "$db" -c "CREATE EXTENSION cat_tools VERSION '$from'"
   update_ext "$db" "$to"
   assert_version "$db" "$to"
+}
+
+# update-check DB FROM_VERSION TO_VERSION
+#   Same as update-check-version, plus a structural comparison against a fresh
+#   install of TO_VERSION (assert_matches_fresh) -- this is precisely the shape
+#   of check that would have caught
+#   https://github.com/Postgres-Extensions/cat_tools/pull/46's trigger__parse
+#   divergence: an update script reaching TO_VERSION with a different function
+#   body than a fresh install of it. Only use this where TO_VERSION is a
+#   target the update path is actually expected to converge on. Every
+#   ALREADY-TAGGED version is a poor fit for this: a comment-only tweak PR #46
+#   made to sql/cat_tools.sql.in and the 0.2.2->0.2.3 update script never
+#   reached the frozen sql/cat_tools--0.2.3.sql.in fresh-install script (a
+#   version-specific file, once tagged, is NEVER edited to fix this kind of
+#   drift -- see CLAUDE.md's SQL file conventions rule 5), so ANY path
+#   reaching 0.2.3 diverges from "fresh install pinned at exactly 0.2.3",
+#   regardless of origin -- use update-check-version for any TO_VERSION that
+#   is already tagged. Reaching the CURRENT version is where convergence is
+#   both expected and proven (see update-scenario, and diff-fresh against
+#   any already-populated database).
+update_check() {
+  local db=$1 from=$2 to=$3
+  update_check_version "$db" "$from" "$to"
+  assert_matches_fresh "$db" "$to"
 }
 
 # Run the pgTAP suite against an already-populated database in existing mode.
@@ -298,6 +386,8 @@ usage() {
   echo "  run-suite DB" >&2
   echo "  update-scenario DB FROM_VERSION" >&2
   echo "  update-check DB FROM_VERSION TO_VERSION" >&2
+  echo "  update-check-version DB FROM_VERSION TO_VERSION" >&2
+  echo "  diff-fresh DB VERSION" >&2
   exit 2
 }
 
@@ -308,13 +398,15 @@ main() {
   local cmd=${1:-}
   shift || true
   case "$cmd" in
-    plant-guard)     plant_guard "$@" ;;
-    update)          update_ext "$@" ;;
-    prepare-old)     prepare_old "$@" ;;
-    run-suite)       run_suite "$@" ;;
-    update-scenario) update_scenario "$@" ;;
-    update-check)    update_check "$@" ;;
-    *)               usage ;;
+    plant-guard)           plant_guard "$@" ;;
+    update)                update_ext "$@" ;;
+    prepare-old)           prepare_old "$@" ;;
+    run-suite)             run_suite "$@" ;;
+    update-scenario)       update_scenario "$@" ;;
+    update-check)          update_check "$@" ;;
+    update-check-version)  update_check_version "$@" ;;
+    diff-fresh)            assert_matches_fresh "$@" ;;
+    *)                     usage ;;
   esac
 }
 
