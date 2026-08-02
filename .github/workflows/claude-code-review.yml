@@ -9,8 +9,13 @@ name: Claude Code Review
 # write-capable token. The job is gated to PRs from the trusted `jnasbyupgrade`
 # fork only — an arbitrary external fork can never trigger this secret-bearing
 # job. The workflow file always comes from the base branch (master), so a PR
-# cannot modify the reviewer that runs on it. We check out the PR head only for
-# read context (persist-credentials: false) and never build or execute PR code.
+# cannot modify the reviewer that runs on it. We never check out the fork's PR
+# head ourselves here: anthropics/claude-code-action's own internal checkout
+# logic (setupBranch() in src/github/operations/branch.ts) already fetches the
+# PR branch via `git fetch origin pull/<N>/head`, which requires `origin` to be
+# the BASE repo -- checking out the fork directly instead (as a prior version
+# of this file did) points `origin` at the fork, which has no such ref, and
+# breaks that fetch with "couldn't find remote ref pull/<N>/head".
 on:
   pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review]
@@ -24,13 +29,11 @@ jobs:
     # Trusted fork only, and skip drafts (don't spend API/CI on unfinished PRs).
     # To add more trusted owners, extend the head-owner check.
     #
-    # SECURITY-CRITICAL: this owner check is the ONLY thing that makes
-    # `allow-unsafe-pr-checkout: true` below acceptable. Without it, this
-    # pull_request_target job would check out and let Claude act on
-    # arbitrary fork code while holding base-repo secrets/token — a "pwn
-    # request". Do not remove or loosen this condition (e.g. drop the
-    # owner check, or allow non-owner forks) without re-evaluating the
-    # fork-checkout step's safety.
+    # SECURITY-CRITICAL: this owner check is what makes it safe to run this
+    # pull_request_target job -- which holds base-repo secrets/token -- on
+    # every fork PR unattended. Do not remove or loosen this condition (e.g.
+    # drop the owner check, or allow non-owner forks) without re-evaluating
+    # whether this job should keep running on arbitrary forks.
     if: >-
       github.event.pull_request.draft == false &&
       github.event.pull_request.head.repo.owner.login == 'jnasbyupgrade'
@@ -89,22 +92,19 @@ jobs:
           echo "decision=$decision" >> "$GITHUB_OUTPUT"
           echo "gate decision: $decision"
 
-      - name: Check out PR head (read-only context)
+      - name: Check out base branch
         if: steps.gate.outputs.decision == 'run'
         # Intentionally tracks the major-version tag (not a pinned SHA) so
         # upstream fixes are picked up automatically.
+        #
+        # No `repository:`/`ref:` here on purpose — this checks out the base
+        # branch (master), never the fork's PR head. See the SECURITY note
+        # above; anthropics/claude-code-action fetches the actual PR head
+        # itself afterward via the base repo's `refs/pull/<N>/head` ref.
         uses: actions/checkout@v6
         with:
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 1
           persist-credentials: false
-          # Unsafe by default (actions/checkout refuses fork-PR checkouts
-          # under pull_request_target/workflow_run). Only OK here because
-          # the job is gated to the project owner's forks — see the `if:`
-          # on the `claude-review` job above; that check is what makes
-          # this safe.
-          allow-unsafe-pr-checkout: true
 
       - name: Run Claude Code Review
         if: steps.gate.outputs.decision == 'run'
