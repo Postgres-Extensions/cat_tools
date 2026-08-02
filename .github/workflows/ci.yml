@@ -309,10 +309,13 @@ jobs:
           # drift check must actually run on every version, not pass silently.
           make check-relkind-source
           # verify-results is the real gate: base.mk declares `verify-results:
-          # test`, so this runs the suite via its `test` prerequisite and then
-          # checks the pgtap/regression.diffs. A bare `make test` is redundant here
-          # and would not gate anyway -- it never exits non-zero on regressions
-          # (pgxntool marks installcheck `.IGNORE`), so failures would pass silently.
+          # $(TEST_DEPS)`, not `verify-results: test` -- deliberately, since test's own
+          # recipe now exits non-zero as soon as it sees a regression, which would abort
+          # the chain before verify-results got to inspect and report the diff. Either
+          # way this runs the suite (via installcheck, one of $(TEST_DEPS)) and then
+          # checks the pgtap/regression.diffs. A bare `make test` is redundant here:
+          # it now also exits non-zero on regressions (pgxntool 2.3.0+), but
+          # verify-results is still the stricter, documented check.
           make verify-results
 
   # Style linter (https://github.com/Postgres-Extensions/linter, vendored at
