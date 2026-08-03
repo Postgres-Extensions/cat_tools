@@ -6,6 +6,17 @@ After **every** push, monitor GitHub CI in a background subagent until all jobs 
 
 (`.github/workflows/ci.yml`'s `changes` job computes the actual per-push changed file set and exposes `docs_only`; the heavy `test`, `pg-upgrade-test`, and `extension-update-test` jobs skip when `needs.changes.outputs.docs_only == 'true'` — i.e. every changed file in that push matches `**.md`/`**.asc`. Unlike the old workflow-level `paths-ignore`, this is evaluated per push/commit, not over the whole PR diff, so a doc-only commit on a PR that also touches code still gets the skip, and the workflow (including the required `all-checks-passed` check) always triggers and reports rather than being skipped outright by GitHub. When unsure, check `gh run list` for the pushed commit and monitor whatever run appears; if none does, there is nothing to watch.)
 
+## Where a test-matrix dimension belongs
+
+The full set of things we test is itself a matrix (PostgreSQL major, update path, schema
+targeting, pg_tle vs. filesystem, and — over time — more `make`-level test targets too).
+When adding a new dimension, prefer putting it in `make` over `ci.yml` whenever that's
+reasonable: it can then be run locally, and it never spins up an extra container/job. The
+one reason to prefer `ci.yml` instead is when a dimension genuinely needs its own
+isolated environment to mean anything (e.g. pg_tle's dedicated cluster, proving isolation
+holds) — `ci.yml` *can* batch multiple checks into one job, but doing that on purpose adds
+real complexity there, so default to `make` unless isolation is the actual point.
+
 ## Build/test system (pgxntool)
 
 This repo's build is driven by pgxntool (embedded under `pgxntool/`). Its docs are
