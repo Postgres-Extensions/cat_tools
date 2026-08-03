@@ -87,6 +87,10 @@ Write it accordingly:
 - Do NOT hard-wrap paragraphs: write each paragraph as a single long line (blank line
   between paragraphs). Hard-wrapping at ~80 columns conflicts with how GitHub builds the
   squash commit message from the description.
+- Length past the opening is fine — backstory and detail are often worth keeping. Being
+  hard to *scan* is the actual problem: if there's enough detail to justify it, give the
+  rest real structure (headers, bullet lists, separate sections for "what changed" vs.
+  "how it was verified"), not one undifferentiated block of prose.
 
 ## SQL file conventions
 
