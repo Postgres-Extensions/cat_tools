@@ -257,11 +257,21 @@ jobs:
   #                    1. FRESH install, default schema -- a plain
   #                       `make verify-results`, the baseline a brand-new user
   #                       gets.
-  #                    2. TEST_SCHEMA's quoting-requiring-schema pipeline, on
-  #                       both the fresh and update paths -- `make test-long`,
-  #                       which bundles the test-schema/test-update-schema
-  #                       targets (see the Makefile comment for exactly what
-  #                       test-long bundles, and why it's designed to grow).
+  #                    2. `make test-long` -- every test-* target except
+  #                       plain `test` itself (test-update, test-schema,
+  #                       test-update-schema; see the Makefile comment for
+  #                       the simple-inclusion rule and why it's designed to
+  #                       grow). Primarily this is TEST_SCHEMA's
+  #                       quoting-requiring-schema pipeline, on both the fresh
+  #                       and update paths -- but test-update (no schema
+  #                       targeting) rides along too, so this ALSO re-proves
+  #                       part of what (3) below already proves more
+  #                       thoroughly. That overlap is real and accepted, not
+  #                       an oversight: a single `make test` pass costs about
+  #                       a second, so one more of them per major is
+  #                       negligible next to the runner/container cost (3)
+  #                       itself was folded in here to avoid -- see the
+  #                       Makefile's test-long comment for the full reasoning.
   #                    3. The GUARD-PROVED update-to-current check:
   #                       bin/test_existing's update-scenario -- CREATE
   #                       EXTENSION at the 0.2.2 backward-compat floor, ALTER
@@ -384,19 +394,25 @@ jobs:
           # $(TEST_DEPS)) and then checks the pgtap/regression.diffs.
           make verify-results
 
-          # test-long bundles the test-* targets that don't get their own CI
-          # step: test-schema and test-update-schema (TEST_SCHEMA's
-          # quoting-requiring pipeline, on the fresh and update paths --
-          # nothing else, not the verify-results call above, not the
-          # update-scenario call below, covers either). Each recurses into a
-          # plain `make test`, not `verify-results` -- confirmed empirically
-          # (deliberately broke a schema-quoting case and an update-path case
-          # locally, in this exact CI-step order, and confirmed each failed
-          # loudly) that pgxntool 2.3.0's test-exits-nonzero-on-regression
-          # behavior is a real enough gate for these two, and re-running the
-          # suite here is cheap regardless (~1s per invocation; the real CI
-          # cost is container/cluster bring-up, not suite invocations). See
-          # the Makefile's test-long/test-schema/test-update-schema comments.
+          # test-long is every test-* target except plain `test` itself
+          # (test-update, test-schema, test-update-schema -- see the
+          # Makefile's test-long comment for the simple-inclusion rule).
+          # Mainly this covers TEST_SCHEMA's quoting-requiring pipeline on
+          # the fresh and update paths, which nothing else here does -- but
+          # test-update rides along too, so this ALSO re-proves part of what
+          # the update-scenario call below already proves more thoroughly
+          # (dependency-guard proof + structural diff). That overlap is real
+          # and deliberately accepted, not an oversight: a single `make test`
+          # pass costs about a second, so one more of them per major is
+          # negligible -- see the Makefile comment for why that's a
+          # different class of cost from the separate-job overhead
+          # update-scenario itself was folded in here to avoid. Each target
+          # recurses into a plain `make test`, not `verify-results` --
+          # confirmed empirically (deliberately broke a schema-quoting case
+          # and an update-path case locally, in this exact CI-step order, and
+          # confirmed each failed loudly) that pgxntool 2.3.0's
+          # test-exits-nonzero-on-regression behavior is a real enough gate
+          # for these.
           make test-long
 
           # The PG12+ guard-proved update-to-current check, folded in here

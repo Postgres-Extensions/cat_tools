@@ -155,11 +155,22 @@ test-update-schema:
 # The rule is simple inclusion, not a CI-cost judgment call: test-long is
 # every test-* target EXCEPT test itself, full stop -- currently test-update,
 # test-schema, test-update-schema. As new test-* targets get added, they just
-# join this prerequisite list, no redesign needed. (The CI-cost concern that
-# used to shape which scenarios ran where is handled entirely at the ci.yml
-# level -- the guard-proved update-to-current check folded into the `test`
-# job, extension-update-test shrunk to PG10-only -- and does NOT apply here:
-# test-long/test-all are local dev convenience bundles, not CI cost centers.)
+# join this prerequisite list, no redesign needed.
+#
+# test-long is NOT purely a local-dev target, though -- CI's `test` job calls
+# `make test-long` directly, on every supported PostgreSQL major (see that
+# job's step in ci.yml). So test-update's inclusion here means CI now also
+# re-proves part of what that same job's guard-proved update-scenario check
+# (a few lines later in the same step) already proves more thoroughly
+# (dependency-guard proof + structural diff against a fresh install) --
+# real, acknowledged overlap, not an oversight. It's kept anyway: a single
+# `make test` pass costs about a second, so one more of them per matrix leg
+# (test-long already ran test-schema/test-update-schema either way) is
+# negligible -- a wholly different class of cost from the SEPARATE JOB this
+# repo removed two rounds ago folding extension-update-test's PG12+ leg into
+# this same `test` job, which cost a full extra runner/container/checkout per
+# leg (~55s), not one more invocation inside a job already running.
+#
 # Bare prerequisites, not sequential $(MAKE) calls in the recipe body --
 # simpler to read than repeating the same calls here and in each target's own
 # definition, and safe only because of the .NOTPARALLEL declaration above.
