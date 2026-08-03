@@ -255,9 +255,10 @@ jobs:
   #                       `make verify-results`, the baseline a brand-new user
   #                       gets.
   #                    2. TEST_SCHEMA's quoting-requiring-schema pipeline, on
-  #                       both the fresh and update paths -- `make test-long`'s
-  #                       TEST_LONG_SCENARIOS (see the Makefile comment for
-  #                       exactly which two scenarios, and why not more).
+  #                       both the fresh and update paths -- `make test-long`,
+  #                       which bundles the test-schema/test-update-schema
+  #                       targets (see the Makefile comment for exactly what
+  #                       test-long bundles, and why it's designed to grow).
   #                    3. The GUARD-PROVED update-to-current check:
   #                       bin/test_existing's update-scenario -- CREATE
   #                       EXTENSION at the 0.2.2 backward-compat floor, ALTER
@@ -364,26 +365,28 @@ jobs:
           # Fail if the relkind drift source is empty (headers missing): the
           # drift check must actually run on every version, not pass silently.
           make check-relkind-source
-          # The fresh/default-schema baseline: a plain verify-results call,
-          # NOT `make test-long` -- test-long deliberately excludes this exact
-          # {fresh, <empty>} scenario (see its TEST_LONG_SCENARIOS comment in
-          # the Makefile), since it exists to cover ONLY what nothing else
-          # does. This call is what actually exercises the baseline now, so it
-          # can't be dropped. base.mk declares `verify-results: $(TEST_DEPS)`,
-          # not `verify-results: test` -- deliberately, since test's own
-          # recipe now exits non-zero as soon as it sees a regression (pgxntool
-          # 2.3.0+), which would abort the chain before verify-results got to
-          # inspect and report the diff. Either way this runs the suite (via
-          # installcheck, one of $(TEST_DEPS)) and then checks the
-          # pgtap/regression.diffs; verify-results remains the stricter,
-          # documented check, so it's used here rather than leaning on plain
-          # `test`'s newer (and less strict) non-zero exit.
+          # The fresh/default-schema baseline: verify-results, this repo's
+          # stricter, documented, pgtap-aware gate. base.mk declares
+          # `verify-results: $(TEST_DEPS)`, not `verify-results: test` --
+          # deliberately, since test's own recipe now exits non-zero as soon
+          # as it sees a regression (pgxntool 2.3.0+), which would abort the
+          # chain before verify-results got to inspect and report the diff.
+          # Either way this runs the suite (via installcheck, one of
+          # $(TEST_DEPS)) and then checks the pgtap/regression.diffs.
           make verify-results
-          # test-long loops verify-results once per TEST_LONG_SCENARIOS entry
-          # -- fresh:CatToolsSchema, update:CatToolsSchema -- covering exactly
-          # the two scenarios nothing else (not the verify-results call above,
-          # not the update-scenario call below) already covers. See the
-          # Makefile's TEST_LONG_SCENARIOS/test-long comments.
+          # test-long bundles the test-* targets that don't get their own CI
+          # step: test-schema and test-update-schema (TEST_SCHEMA's
+          # quoting-requiring pipeline, on the fresh and update paths --
+          # nothing else, not the verify-results call above, not the
+          # update-scenario call below, covers either). Each recurses into a
+          # plain `make test`, not `verify-results` -- confirmed empirically
+          # (deliberately broke a schema-quoting case and an update-path case
+          # locally, in this exact CI-step order, and confirmed each failed
+          # loudly) that pgxntool 2.3.0's test-exits-nonzero-on-regression
+          # behavior is a real enough gate for these two, and re-running the
+          # suite here is cheap regardless (~1s per invocation; the real CI
+          # cost is container/cluster bring-up, not suite invocations). See
+          # the Makefile's test-long/test-schema/test-update-schema comments.
           make test-long
           # The PG12+ guard-proved update-to-current check, folded in here
           # rather than run as its own matrix job (which extension-update-test

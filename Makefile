@@ -1,15 +1,22 @@
 testdeps: $(wildcard test/*.sql test/helpers/*.sql) # Be careful not to include directories in this
 
 # Test targets, briefly (see each target's own comment below for the why):
-#   test        -- fresh install, default schema. The baseline check.
-#   test-update -- test, but updated from TEST_UPDATE_FROM (default 0.2.2) to
-#                  the current version instead of a fresh install.
-#   test-long   -- ONLY the scenarios nothing else covers (see
-#                  TEST_LONG_SCENARIOS below): TEST_SCHEMA's quoting-requiring
-#                  pipeline on the fresh and update paths. Deliberately
-#                  excludes anything test/test-update/CI's other jobs already
-#                  check.
-#   test-all    -- test + test-long: the full local pre-push gate.
+#   test               -- fresh install, default schema. The baseline check.
+#   test-schema        -- test, but with TEST_SCHEMA set to a quoting-requiring
+#                          schema name.
+#   test-update        -- test, but updated from TEST_UPDATE_FROM (default
+#                          0.2.2) to the current version instead of a fresh
+#                          install. No schema targeting -- symmetric with
+#                          test; test-update-schema below is the combination.
+#   test-update-schema -- test-update + test-schema together: the one
+#                          scenario nothing else covers.
+#   test-long          -- bundles every test-* target too situational for
+#                          plain test/test-update but not worth its own CI
+#                          step. As the suite grows, a new such target just
+#                          gets added to its prerequisite list -- no redesign
+#                          needed.
+#   test-all           -- test + test-update + test-long: the full local
+#                          pre-push gate.
 
 # Committed-once install of the extension + test roles.
 #
@@ -92,86 +99,77 @@ TEST_SCHEMA ?=
 
 export PGOPTIONS := $(PGOPTIONS) -c cat_tools.test_load_mode=$(TEST_LOAD_SOURCE) -c cat_tools.test_update_from=$(TEST_UPDATE_FROM) -c cat_tools.test_update_to=$(TEST_UPDATE_TO) -c cat_tools.test_schema=$(TEST_SCHEMA)
 
-# Schema variant test-long exercises: one mixed-case name that requires SQL
-# identifier quoting -- see TEST_SCHEMA above for what this actually proves.
-# (The empty/ambient-search_path default is deliberately NOT in test-long's
-# scenario list at all -- see TEST_LONG_SCENARIOS below for why.)
-#
 # Scope boundary (deliberate, not an oversight): CI's extension-update-test and
 # pg-upgrade-test jobs do NOT exercise TEST_SCHEMA at all yet -- they drive the
 # extension through bin/test_existing's own createdb/CREATE EXTENSION/ALTER
-# EXTENSION UPDATE flow, not this Makefile's TEST_LOAD_SOURCE path, so
-# test-long below doesn't reach them either. See
+# EXTENSION UPDATE flow, not this Makefile's TEST_LOAD_SOURCE path, so none of
+# the test-* targets below reach them either. See
 # https://github.com/Postgres-Extensions/cat_tools/issues/65 (still open --
-# this is a local-dev-convenience fix, not a fix for that issue).
+# these are local-dev-convenience targets, not a fix for that issue).
 #
-# TEST_LONG_SCENARIOS is an explicit list of "TEST_LOAD_SOURCE:TEST_SCHEMA"
-# pairs -- NOT a full cross product of every TEST_LOAD_SOURCE x every
-# TEST_SCHEMA. test-long exists to cover ONLY what nothing else already
-# covers, so BOTH empty-schema combinations are deliberately absent, each for
-# a different reason:
-#   - {fresh, <empty>} is exactly the plain fresh-install/default-schema case
-#     that `make test`/`installcheck` (and CI's `test` job step, via its own
-#     explicit `make verify-results` call -- see ci.yml) already checks.
-#     test-long including it too would just be re-running that same case
-#     again under a different name.
-#   - {update, <empty>} is exactly "0.2.2 updated to the current version,
-#     default schema, full suite", already proven -- more thoroughly -- by
-#     CI's extension-update-test job (bin/test_existing's update_scenario
-#     additionally plants and proves the dependency guard) on the SAME
-#     PostgreSQL majors (12-18) that the `test` job (and so test-long) runs on.
-# Repeating either here would add CI wall-clock with no added confidence. The
-# two scenarios kept are exactly the ones nothing else covers: TEST_SCHEMA's
-# quoting-requiring pipeline on the fresh path (fresh:CatToolsSchema) and on
-# the update path (update:CatToolsSchema) -- the latter also a partial answer
-# to https://github.com/Postgres-Extensions/cat_tools/issues/65, which asks
-# for TEST_SCHEMA coverage on the update path.
-TEST_LONG_SCENARIOS ?= fresh:CatToolsSchema update:CatToolsSchema
-
-# Loops the full suite once per TEST_LONG_SCENARIOS entry via `verify-results`,
-# NOT plain `test`: verify-results is this repo's documented CI-safe gate
-# (make test alone doesn't reliably fail on regressions the way verify-results
-# does -- see CLAUDE.md), and CI relies on test-long to fail loudly on a
-# regression the same way a single
-# `make verify-results TEST_LOAD_SOURCE=X TEST_SCHEMA=Y` already does. Must
-# recurse (a fresh $(MAKE) per iteration, not a plain shell variable) for the
-# same reason test-update recurses: these GUCs only take effect if exported
-# into PGOPTIONS before the sub-make's own parse phase. Each scenario is
-# "load_source:schema"; %% / # parameter expansion splits on the FIRST colon
-# (also correct if a schema were ever empty, e.g. "fresh:" -> schema ""), so a
-# schema name containing a colon would break this, but none of ours do.
-.PHONY: test-long
-test-long:
-	@for scenario in $(TEST_LONG_SCENARIOS); do \
-		load_source=$${scenario%%:*}; \
-		schema=$${scenario#*:}; \
-		echo "=== TEST_LOAD_SOURCE=$$load_source TEST_SCHEMA=$$schema ==="; \
-		$(MAKE) verify-results TEST_LOAD_SOURCE="$$load_source" TEST_SCHEMA="$$schema" || exit 1; \
-	done
+# Convenience wrapper: `make test-schema` == `make test TEST_SCHEMA=CatToolsSchema`.
+# Must recurse (a fresh $(MAKE)) rather than depend on `test`, so the parse-time
+# TEST_SCHEMA default above re-evaluates with CatToolsSchema set -- same
+# reasoning as test-update below. CatToolsSchema is hardcoded here rather than
+# a variable: there's exactly one quoting-requiring name this repo tests
+# against (see TEST_SCHEMA above for what it actually proves), so a variable
+# indirection would add nothing.
+.PHONY: test-schema
+test-schema:
+	$(MAKE) test TEST_SCHEMA=CatToolsSchema
 
 # Convenience wrapper: `make test-update` == `make test TEST_LOAD_SOURCE=update`.
 # Must recurse (a fresh $(MAKE)) rather than depend on `test`, so the parse-time
-# TEST_LOAD_SOURCE conditional above re-evaluates with update set. Kept as a
-# standalone target for a quick single-mode run; test-long (below) covers the
-# same update axis as part of its full loop, so test-all no longer calls this
-# separately.
+# TEST_LOAD_SOURCE conditional above re-evaluates with update set. Deliberately
+# NO schema targeting -- symmetric with plain `test` above (each is the
+# "default schema" leg of its own load mode); test-update-schema below is the
+# update+schema combination.
 .PHONY: test-update
 test-update:
 	$(MAKE) test TEST_LOAD_SOURCE=update
 
-# Runs test (fresh; gates via test's own regression.diffs check, pgxntool
-# 2.3.0+, but not as strict as verify-results's pgtap-aware check -- still
-# useful as a quick smoke build) followed by test-long, which covers the
-# TEST_LONG_SCENARIOS above THROUGH verify-results, this repo's stricter,
-# documented gate. Sequential $(MAKE) calls in the recipe body, NOT bare
-# prerequisites -- listing them as prerequisites would let Make run them
-# concurrently under -j, and they all share the same throwaway test database
-# (same hazard already called out by verify-results's own dependency-ordering
-# comment in pgxntool/base.mk).
+# Convenience wrapper: TEST_LOAD_SOURCE=update AND TEST_SCHEMA=CatToolsSchema
+# together -- the one scenario nothing else here covers (test-update above
+# covers the update path with no schema targeting; test-schema above covers
+# schema targeting on the fresh path only). Also a partial answer to
+# https://github.com/Postgres-Extensions/cat_tools/issues/65, which asks for
+# TEST_SCHEMA coverage on the update path -- see the scope-boundary comment
+# above for the CI-level gap (extension-update-test/pg-upgrade-test) this does
+# NOT close.
+.PHONY: test-update-schema
+test-update-schema:
+	$(MAKE) test TEST_LOAD_SOURCE=update TEST_SCHEMA=CatToolsSchema
+
+# .NOTPARALLEL covers this whole test-* family, not just test-long/test-all
+# below (the only two with real prerequisites): each of these targets
+# recurses into its own $(MAKE) invocation against the SAME throwaway test
+# database, and running two of them concurrently (under a hypothetical
+# `make -j`) would corrupt that shared state. That lets test-long/test-all
+# list bare prerequisites instead of writing out sequential $(MAKE) calls in
+# every recipe body. Safe to declare this broadly: nothing in this repo's
+# build ever invokes `-j` (grepped ci.yml, this Makefile, sql.mk, lint.mk, and
+# pgxntool's own .mk files/docs -- none do), and empirically, GNU Make 4.3's
+# `.NOTPARALLEL: a b` does NOT scope narrowly to just `a`/`b` anyway -- it
+# serializes the WHOLE invoked build graph once ANY targets are listed, so
+# there's no narrower behavior being given up here even in principle.
+.NOTPARALLEL: test test-schema test-update test-update-schema test-long test-all
+
+# Bundles every test-* target too situational for plain test/test-update but
+# not worth its own CI step -- right now that's just the schema-targeting
+# variants (test-schema, test-update-schema) above, but as the suite grows a
+# new such target just gets added to this prerequisite list, no redesign
+# needed. Bare prerequisites, not sequential $(MAKE) calls in the recipe body
+# -- simpler to read than repeating the same calls here and in each target's
+# own definition, and safe only because of the .NOTPARALLEL declaration above.
+.PHONY: test-long
+test-long: test-schema test-update-schema
+
+# Runs every test-* target that matters for a full local pre-push check: test
+# (fresh, default schema), test-update (update path, default schema), and
+# test-long (everything else -- see its own comment). Bare prerequisites,
+# safe under the same .NOTPARALLEL declaration as test-long.
 .PHONY: test-all
-test-all:
-	$(MAKE) test
-	$(MAKE) test-long
+test-all: test test-update test-long
 
 # Versioned SQL is generated from .sql.in at build time. That generation, the
 # DATA list that installs it, and the relkind drift source all live in sql.mk,
