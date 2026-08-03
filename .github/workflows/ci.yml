@@ -192,16 +192,17 @@ jobs:
         id: pg
         run: |
           # Spending 20+ lines to replace a handful of version references looks
-          # silly on the surface, but the point is CONSISTENCY: every job -- the
-          # fresh-install `test` matrix, the `extension-update-test` matrix and
-          # the stepwise climb -- derives its PostgreSQL set from this ONE source,
-          # so they cannot drift onto different version lists.
+          # silly on the surface, but the point is CONSISTENCY: every job below
+          # (the `test`/`pg-tle-test` matrix, `extension-update-test`'s single
+          # legacy major, and the stepwise climb) derives its PostgreSQL set
+          # from this ONE source, so they cannot drift onto different version
+          # lists.
           #
           # SINGLE SOURCE OF TRUTH for the supported PostgreSQL majors. To add
-          # or drop a PG major, edit ONLY the three constants below; the test,
-          # extension-update-test and pg-upgrade-stepwise jobs all derive their
-          # version lists from them (adding the newest major is a one-line NEWEST
-          # bump). Do NOT hardcode a supported major in any job matrix or loop.
+          # or drop a PG major, edit ONLY the three constants below; every job
+          # derives its version list from them (adding the newest major is a
+          # one-line NEWEST bump). Do NOT hardcode a supported major in any job
+          # matrix or loop.
           #
           #   NEWEST        -- highest PostgreSQL major cat_tools is tested on.
           #   CURRENT_FLOOR -- oldest major the CURRENT extension version supports:
