@@ -279,21 +279,26 @@ jobs:
   #                       coverage. See that step's own comment for what was
   #                       verified locally before folding it in.
   #
-  #   pg-tle-test -- The SAME majors, but proving cat_tools works when
-  #                  deployed via pg_tle (AWS's Trusted Language Extensions)
-  #                  instead of a filesystem .control file -- fresh install,
-  #                  dynamic version assertion, and the update path, all
-  #                  asserted to leave NO filesystem trace throughout.
+  #   pg-tle-test -- The SAME majors, proving cat_tools actually works
+  #                  correctly when deployed via pg_tle (AWS's Trusted
+  #                  Language Extensions) instead of a filesystem .control
+  #                  file -- fresh install, dynamic version assertion, and
+  #                  the update path, the same scenarios (1)/(3) above prove
+  #                  for a filesystem install, run again here through pg_tle's
+  #                  own registration mechanism instead. That correctness
+  #                  proof only means what it claims to if pg_tle ISOLATION
+  #                  actually holds throughout the run (a stale filesystem
+  #                  .control file silently wins over a pg_tle registration of
+  #                  the same name -- PostgreSQL does not error, it just
+  #                  resolves from disk instead), so every step here is
+  #                  bracketed by filesystem-cleanliness checks -- but
+  #                  isolation is the PRECONDITION that makes this job's
+  #                  result trustworthy, not the point of running it.
   #                  Deliberately NOT folded into `test` above like (3) was:
-  #                  this is specifically about proving pg_tle ISOLATION (a
-  #                  stale filesystem .control file silently wins over a
-  #                  pg_tle registration of the same name -- PostgreSQL does
-  #                  not error, it just resolves from disk instead), not
-  #                  filesystem-install coincidence, and pg_tle requires
-  #                  shared_preload_libraries (mixing pg_tle/non-pg_tle
-  #                  extension installs on one cluster can misbehave) -- a
-  #                  dedicated cluster/job is the only way either guarantee
-  #                  means anything.
+  #                  pg_tle requires shared_preload_libraries (mixing
+  #                  pg_tle/non-pg_tle extension installs on one cluster can
+  #                  misbehave), so a dedicated cluster/job is the only way to
+  #                  run it at all.
   #
   # SPECIAL CASES -- apply to one specific scenario, not the whole matrix:
   #
