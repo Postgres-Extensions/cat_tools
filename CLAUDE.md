@@ -185,10 +185,13 @@ Never use `--` line comments for multi-line explanations.
 Be concise — humans have limited context too, not just AI. Say the point in as few words
 as it needs, not as many as the topic could support.
 
-Explain something at the *first* place it's mentioned, not somewhere later that assumes
-context the reader hasn't reached yet (exceptions need a reason). When a comment points
-to another spot in the same file, say `above` or `below` so the reader doesn't have to
-search both directions.
+Usually, explain something at the *first* place it's mentioned, not somewhere later that
+assumes context the reader hasn't reached yet — but this isn't absolute. One real
+exception: you're already in the middle of explaining A, and need to mention B (which
+also needs its own explanation) — stopping to fully explain B right there often confuses
+the explanation of A more than deferring B to its own natural spot would. Use judgment.
+When a comment points to another spot in the same file, say `above` or `below` so the
+reader doesn't have to search both directions.
 
 ### Closing non-indentable blocks
 When closing a code block that cannot be indented to show its nesting (e.g. SQL
