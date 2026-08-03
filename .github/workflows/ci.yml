@@ -243,23 +243,46 @@ jobs:
   # Test strategy
   #
   # A cat_tools install can be arrived at several ways, each of which can break
-  # differently, so each is exercised by its own job below (the per-job comments
-  # carry the details; this is the big picture):
+  # differently, so each is exercised by its own job below (the per-job
+  # comments carry the details; this is the big picture):
   #
-  #   test                  -- FRESH install: CREATE EXTENSION at the current
-  #                            version on every supported PostgreSQL. The baseline
-  #                            a brand-new user gets.
-  #   extension-update-test -- IN-PLACE update: CREATE EXTENSION at an OLD version
-  #                            then ALTER EXTENSION UPDATE (same PostgreSQL, no
-  #                            pg_upgrade).
-  #   pg-upgrade-test       -- BINARY pg_upgrade, SINGLE jump: install an OLD
-  #                            version on an OLD major, binary-upgrade the cluster
-  #                            straight to a NEWER major (skipping intermediate
-  #                            majors), then update the extension. Proves objects
-  #                            created on an old server work when read on a new one.
-  #   pg-upgrade-stepwise   -- BINARY pg_upgrade, EVERY major in sequence: one
-  #                            cluster climbing 10 -> 11 -> ... -> 18, exercising
-  #                            each individual major-to-major transition in turn.
+  # test
+  # FRESH install: CREATE EXTENSION at the current version, on every
+  # supported PostgreSQL major. The baseline a brand-new user gets.
+  #
+  # pg-upgrade-test
+  # BINARY pg_upgrade, SINGLE jump: install an OLD version on an OLD major,
+  # binary-upgrade the cluster straight to a NEWER major (skipping
+  # intermediate majors), then update the extension. Proves objects created
+  # on an old server work when read on a new one.
+  #
+  # pg-upgrade-stepwise
+  # BINARY pg_upgrade, EVERY major in sequence: one cluster climbing
+  # 10 -> 11 -> ... -> 18, exercising each individual major-to-major
+  # transition in turn.
+  #
+  # extension-update-test
+  # IN-PLACE update: CREATE EXTENSION at an OLD version then ALTER EXTENSION
+  # UPDATE (same PostgreSQL, no pg_upgrade).
+  #
+  # pg-tle-test
+  # The SAME majors as `test`, proving cat_tools actually works when
+  # deployed via pg_tle (AWS's Trusted Language Extensions) instead of a
+  # filesystem .control file -- the same fresh-install and update-path
+  # scenarios `test`/extension-update-test prove for a filesystem install,
+  # run again through pg_tle's own registration. That proof only means what
+  # it claims if pg_tle ISOLATION holds throughout the run (a stale
+  # filesystem .control file silently wins over a pg_tle registration of
+  # the same name -- PostgreSQL just resolves from disk instead of
+  # erroring), so every step here is bracketed by filesystem-cleanliness
+  # checks -- isolation is the precondition for a trustworthy result, not
+  # the point of the job. NOT folded into `test`: pg_tle needs
+  # shared_preload_libraries (mixing pg_tle/non-pg_tle installs on one
+  # cluster can misbehave), so it needs its own dedicated cluster.
+  #
+  # pg-tle-upgrade-test
+  # The pg_tle-deployed equivalent of pg-upgrade-test, on the jump pairs
+  # within pg_tle's own supported PostgreSQL range.
   #
   # Supported update origins are 0.2.0, 0.2.1 and 0.2.2 (0.1.x is unsupported).
   # 0.2.0 and 0.2.1 are BOTH tested as origins because ALTER EXTENSION UPDATE
@@ -306,16 +329,17 @@ jobs:
       - name: Test on PostgreSQL ${{ matrix.pg }}
         run: |
           # Fail if the relkind drift source is empty (headers missing): the
-          # drift check must actually run on every version, not pass silently.
+          # drift check must run on every version, not pass silently.
           make check-relkind-source
           # verify-results is the real gate: base.mk declares `verify-results:
-          # $(TEST_DEPS)`, not `verify-results: test` -- deliberately, since test's own
-          # recipe now exits non-zero as soon as it sees a regression, which would abort
-          # the chain before verify-results got to inspect and report the diff. Either
-          # way this runs the suite (via installcheck, one of $(TEST_DEPS)) and then
-          # checks the pgtap/regression.diffs. A bare `make test` is redundant here:
-          # it now also exits non-zero on regressions (pgxntool 2.3.0+), but
-          # verify-results is still the stricter, documented check.
+          # $(TEST_DEPS)`, not `verify-results: test`, because test's own
+          # recipe now exits non-zero on a regression, which would abort the
+          # chain before verify-results could inspect and report the diff.
+          # Either way this runs the suite via installcheck, then checks
+          # pgtap/regression.diffs. A bare `make test` is redundant here for
+          # the same reason -- it now also exits non-zero on a regression
+          # (pgxntool 2.3.0+), but verify-results is the stricter, documented
+          # check.
           make verify-results
 
   # Style linter (https://github.com/Postgres-Extensions/linter, vendored at
