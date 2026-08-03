@@ -10,13 +10,11 @@ testdeps: $(wildcard test/*.sql test/helpers/*.sql) # Be careful not to include 
 #                          test; test-update-schema below is the combination.
 #   test-update-schema -- test-update + test-schema together: the one
 #                          scenario nothing else covers.
-#   test-long          -- bundles every test-* target too situational for
-#                          plain test/test-update but not worth its own CI
-#                          step. As the suite grows, a new such target just
-#                          gets added to its prerequisite list -- no redesign
-#                          needed.
-#   test-all           -- test + test-update + test-long: the full local
-#                          pre-push gate.
+#   test-long          -- every test-* target EXCEPT test itself (currently:
+#                          test-update, test-schema, test-update-schema). As
+#                          new test-* targets get added, they just join this
+#                          prerequisite list -- no redesign needed.
+#   test-all           -- test + test-long: the full local pre-push gate.
 
 # Committed-once install of the extension + test roles.
 #
@@ -154,22 +152,25 @@ test-update-schema:
 # there's no narrower behavior being given up here even in principle.
 .NOTPARALLEL: test test-schema test-update test-update-schema test-long test-all
 
-# Bundles every test-* target too situational for plain test/test-update but
-# not worth its own CI step -- right now that's just the schema-targeting
-# variants (test-schema, test-update-schema) above, but as the suite grows a
-# new such target just gets added to this prerequisite list, no redesign
-# needed. Bare prerequisites, not sequential $(MAKE) calls in the recipe body
-# -- simpler to read than repeating the same calls here and in each target's
-# own definition, and safe only because of the .NOTPARALLEL declaration above.
+# The rule is simple inclusion, not a CI-cost judgment call: test-long is
+# every test-* target EXCEPT test itself, full stop -- currently test-update,
+# test-schema, test-update-schema. As new test-* targets get added, they just
+# join this prerequisite list, no redesign needed. (The CI-cost concern that
+# used to shape which scenarios ran where is handled entirely at the ci.yml
+# level -- the guard-proved update-to-current check folded into the `test`
+# job, extension-update-test shrunk to PG10-only -- and does NOT apply here:
+# test-long/test-all are local dev convenience bundles, not CI cost centers.)
+# Bare prerequisites, not sequential $(MAKE) calls in the recipe body --
+# simpler to read than repeating the same calls here and in each target's own
+# definition, and safe only because of the .NOTPARALLEL declaration above.
 .PHONY: test-long
-test-long: test-schema test-update-schema
+test-long: test-update test-schema test-update-schema
 
-# Runs every test-* target that matters for a full local pre-push check: test
-# (fresh, default schema), test-update (update path, default schema), and
-# test-long (everything else -- see its own comment). Bare prerequisites,
-# safe under the same .NOTPARALLEL declaration as test-long.
+# The full local pre-push gate: test (the one target test-long deliberately
+# excludes) plus test-long (everything else). Bare prerequisites, safe under
+# the same .NOTPARALLEL declaration as test-long.
 .PHONY: test-all
-test-all: test test-update test-long
+test-all: test test-long
 
 # Versioned SQL is generated from .sql.in at build time. That generation, the
 # DATA list that installs it, and the relkind drift source all live in sql.mk,
