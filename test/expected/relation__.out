@@ -1,5 +1,5 @@
 \set ECHO none
-1..38
+1..39
 ok 1 - Verify count from kinds
 ok 2 - Simple sanity check of relation__kind()
 ok 3 - Simple sanity check of relation__relkind()
@@ -38,4 +38,5 @@ ok 35 - Temp table returns expected column names
 ok 36 - Drop middle column from temp table
 ok 37 - Temp table with dropped column returns expected column names
 ok 38 - NULL input returns NULL (STRICT function)
+ok 39 - cat_tools schema(s) must not be part of the resolved search_path -- got {tap,public}
 # TRANSACTION INTENTIONALLY LEFT OPEN!

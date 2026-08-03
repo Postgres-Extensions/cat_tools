@@ -10,6 +10,7 @@ SELECT plan(
   + 1
   + 2 -- no_use tests
   + 1
+  + 1 -- search_path still clean (test/finish.sql)
 );
 
 SELECT lives_ok(
@@ -35,6 +36,7 @@ SELECT results_eq(
   , $$VALUES ( 'ZZZ Label 1' ), ( 'Label 2' )$$
 );
 
+\i test/finish.sql
 \i test/pgxntool/finish.sql
 
 -- vi: expandtab ts=2 sw=2

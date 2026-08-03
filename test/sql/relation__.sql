@@ -43,6 +43,7 @@ SELECT plan(
   + 4 -- relation__is_catalog
   + 5 -- relation__column_names
   + 1 -- relkind drift check vs pg_class.h
+  + 1 -- search_path still clean (test/finish.sql)
 );
 
 -- relation_type enum mapping
@@ -214,6 +215,7 @@ SELECT is(
   , 'NULL input returns NULL (STRICT function)'
 );
 
+\i test/finish.sql
 \i test/pgxntool/finish.sql
 
 -- vi: expandtab ts=2 sw=2

@@ -26,6 +26,7 @@ SELECT plan((
   +2 -- next
   +8 -- set
   +3 -- currval
+  +1 -- search_path still clean (test/finish.sql)
 )::int);
 
 GRANT SELECT ON functions TO public;
@@ -135,6 +136,7 @@ SELECT is(
   , 'currval'
 );
 
+\i test/finish.sql
 \i test/pgxntool/finish.sql
 
 -- vi: expandtab ts=2 sw=2

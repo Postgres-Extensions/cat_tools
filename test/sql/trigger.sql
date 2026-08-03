@@ -17,6 +17,8 @@ SELECT plan(
   + 2 -- verify trigger__parse output
 
   + 1 -- verify trigger__args_as_array()
+
+  + 1 -- search_path still clean (test/finish.sql)
 );
 
 SET LOCAL ROLE :"no_use_role";
@@ -149,6 +151,7 @@ SELECT is(
   , 'verify trigger__args_as_text()'
 );
 
+\i test/finish.sql
 \i test/pgxntool/finish.sql
 
 -- vi: expandtab ts=2 sw=2

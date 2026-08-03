@@ -1,5 +1,5 @@
 \set ECHO none
-1..10
+1..11
 ok 1 - Verify public has no perms
 ok 2 - Verify public has no perms
 ok 3 - Verify public has no perms
@@ -10,4 +10,5 @@ ok 7 - SELECT cat_tools.trigger__parse( 1259 ) throws correct error for missing 
 ok 8 - verify results of trigger__parse(oid)
 ok 9 - verify results of trigger__parse(regclass,text)
 ok 10 - verify trigger__args_as_text()
+ok 11 - cat_tools schema(s) must not be part of the resolved search_path -- got {tap,public}
 # TRANSACTION INTENTIONALLY LEFT OPEN!

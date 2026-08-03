@@ -16,6 +16,7 @@ SELECT plan(
   + (SELECT count(*)::int FROM func_calls)
 
   + 4 -- pg_attribute__get()
+  + 1 -- search_path still clean (test/finish.sql)
 );
 
 SET LOCAL ROLE :"no_use_role";
@@ -110,6 +111,7 @@ SELECT results_eq(
 );
 
 
+\i test/finish.sql
 \i test/pgxntool/finish.sql
 
 -- vi: expandtab ts=2 sw=2

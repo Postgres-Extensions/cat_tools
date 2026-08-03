@@ -1,5 +1,5 @@
 \set ECHO none
-1..230
+1..231
 ok 1 - sanity check size of pg_temp.extra_types()
 ok 2 - sanity check size of pg_temp.obj_type
 ok 3 - Permission denied trying to use types
@@ -230,4 +230,5 @@ ok 227 - Simple 'regclass'::regtype should not return pg_catalog.regtype
 ok 228 - cat_tools.object__catalog('table') returns pg_catalog.pg_class
 ok 229 - cat_tools.object__catalog('table') returns pg_catalog.pg_class
 ok 230 - Verify objects__shared_src() returns correct values
+ok 231 - cat_tools schema(s) must not be part of the resolved search_path -- got {public,tap,pg_catalog}
 # TRANSACTION INTENTIONALLY LEFT OPEN!

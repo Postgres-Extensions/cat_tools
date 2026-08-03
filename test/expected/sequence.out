@@ -1,5 +1,5 @@
 \set ECHO none
-1..50
+1..51
 ok 1 - Permission denied trying to use cat_tools.currval()
 ok 2 - Permission denied trying to use cat_tools.setval()
 ok 3 - Permission denied trying to use cat_tools.nextval()
@@ -50,4 +50,5 @@ ok 47 - sequence__next returns correct value
 ok 48 - INSERT INTO seqtest VALUES(default)
 ok 49 - currval
 ok 50 - currval
+ok 51 - cat_tools schema(s) must not be part of the resolved search_path -- got {tap,public}
 # TRANSACTION INTENTIONALLY LEFT OPEN!

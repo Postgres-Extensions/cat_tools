@@ -17,6 +17,8 @@ SELECT plan(
   + 1 -- extension__schemas_unique
   + 1 -- extension__schemas
   + 1 -- extension__schemas_unique with bad schema
+
+  + 1 -- search_path still clean (test/finish.sql)
 );
 
 SELECT is(
@@ -73,6 +75,7 @@ SELECT throws_ok(
   , 'extension__schemas_unique with bogus extension fails'
 );
 
+\i test/finish.sql
 \i test/pgxntool/finish.sql
 
 -- vi: expandtab ts=2 sw=2

@@ -5,7 +5,10 @@
 \set s cat_tools
 \set f name__check
 
-SELECT plan(5);
+SELECT plan(
+  5
+  + 1 -- search_path still clean (test/finish.sql)
+);
 
 SET LOCAL ROLE :"no_use_role";
 
@@ -56,6 +59,7 @@ SELECT throws_like(
   , 'Error on overflow'
 );
 
+\i test/finish.sql
 \i test/pgxntool/finish.sql
 
 -- vi: expandtab ts=2 sw=2

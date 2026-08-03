@@ -9,6 +9,7 @@ SELECT plan(
     2 -- security definer checks for _cat_tools helpers
   + 1 -- regprocedure()
   + 4 -- deprecated function__arg_types() wrappers
+  + 1 -- search_path still clean (test/finish.sql)
 );
 
 /*
@@ -66,6 +67,7 @@ SELECT is(
   , 'Verify deprecated function__arg_types_text() with simple args'
 );
 
+\i test/finish.sql
 \i test/pgxntool/finish.sql
 
 -- vi: expandtab ts=2 sw=2

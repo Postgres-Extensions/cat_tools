@@ -25,6 +25,7 @@ SELECT plan(
   + 1  -- isnt_definer: routine__parse_arg_names_text
   + 3  -- routine__arg_names() tests
   + 4  -- routine__arg_names_text() tests
+  + 1  -- search_path still clean (test/finish.sql)
 );
 
 \set kind        type
@@ -287,6 +288,7 @@ SELECT is(
   , 'Verify routine__arg_names_text() with no arguments'
 );
 
+\i test/finish.sql
 \i test/pgxntool/finish.sql
 
 -- vi: expandtab ts=2 sw=2
