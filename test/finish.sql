@@ -3,8 +3,7 @@
  * checked here (file end, before finish()) rather than only at setup, so a
  * test that mutates search_path mid-file and never restores it is caught. Not
  * foolproof: mutate-then-restore before this line still slips through. \i'd by
- * every SQL file under test/sql; bump that file's plan() by one to account
- * for it.
+ * every SQL file under test/sql.
  */
 SELECT ok(
     NOT ( 'cat_tools' = ANY (current_schemas(false)) OR '_cat_tools' = ANY (current_schemas(false)) )
@@ -14,8 +13,10 @@ SELECT ok(
     )
 );
 
--- Chain through to pgxntool's own finish, same wrapping pattern as test/setup.sql
--- does for test/pgxntool/setup.sql.
+/*
+ * Chain through to pgxntool's own finish, same wrapping pattern as
+ * test/setup.sql does for test/pgxntool/setup.sql.
+ */
 \i test/pgxntool/finish.sql
 
 -- vi: expandtab ts=2 sw=2
