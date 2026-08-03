@@ -245,77 +245,69 @@ jobs:
   # MAIN MATRIX -- every supported major (12-18, single source: the changes
   # job). Two independently-isolated jobs, since they prove different things:
   #
-  #   test        -- Everything reachable through a FILESYSTEM-installed
-  #                  cat_tools on this major:
-  #                    1. FRESH install -- `make verify-results`, the baseline
-  #                       a brand-new user gets.
-  #                    2. The GUARD-PROVED update-to-current check:
-  #                       bin/test_existing's update-scenario -- CREATE
-  #                       EXTENSION at the 0.2.2 backward-compat floor, ALTER
-  #                       EXTENSION UPDATE to current, structurally compare
-  #                       against a fresh install, then run the full suite in
-  #                       existing mode. USED to be its own matrix job
-  #                       (extension-update-test's PG12+ leg) -- folded in
-  #                       here since it runs on the same majors as (1), and
-  #                       this job's container, checkout, and cat_tools
-  #                       install are already there; a separate job would pay
-  #                       for all of that again for no added coverage. See
-  #                       that step's own comment for what was verified
-  #                       locally before folding it in.
+  # test
+  # Everything reachable through a FILESYSTEM-installed cat_tools on this
+  # major:
+  #   1. FRESH install -- `make verify-results`, the baseline a brand-new
+  #      user gets.
+  #   2. The GUARD-PROVED update-to-current check: bin/test_existing's
+  #      update-scenario -- CREATE EXTENSION at the 0.2.2 backward-compat
+  #      floor, ALTER EXTENSION UPDATE to current, structurally compare
+  #      against a fresh install, then run the full suite in existing mode.
+  #      USED to be its own matrix job (extension-update-test's PG12+ leg)
+  #      -- folded in here since it runs on the same majors as (1), and
+  #      this job's container, checkout, and cat_tools install are already
+  #      there; a separate job would pay for all of that again for no added
+  #      coverage. See that step's own comment for what was verified
+  #      locally before folding it in.
   #
-  #   pg-tle-test -- The SAME majors, proving cat_tools actually works when
-  #                  deployed via pg_tle (AWS's Trusted Language Extensions)
-  #                  instead of a filesystem .control file -- the same
-  #                  fresh-install and update-path scenarios (1)/(2) prove for
-  #                  a filesystem install, run again through pg_tle's own
-  #                  registration. That proof only means what it claims if
-  #                  pg_tle ISOLATION holds throughout the run (a stale
-  #                  filesystem .control file silently wins over a pg_tle
-  #                  registration of the same name -- PostgreSQL just
-  #                  resolves from disk instead of erroring), so every step
-  #                  here is bracketed by filesystem-cleanliness checks --
-  #                  isolation is the precondition for a trustworthy result,
-  #                  not the point of the job. NOT folded into `test` above:
-  #                  pg_tle needs shared_preload_libraries (mixing pg_tle/
-  #                  non-pg_tle installs on one cluster can misbehave), so it
-  #                  needs its own dedicated cluster.
+  # pg-tle-test
+  # The SAME majors, proving cat_tools actually works when deployed via
+  # pg_tle (AWS's Trusted Language Extensions) instead of a filesystem
+  # .control file -- the same fresh-install and update-path scenarios (1)/(2)
+  # prove for a filesystem install, run again through pg_tle's own
+  # registration. That proof only means what it claims if pg_tle ISOLATION
+  # holds throughout the run (a stale filesystem .control file silently wins
+  # over a pg_tle registration of the same name -- PostgreSQL just resolves
+  # from disk instead of erroring), so every step here is bracketed by
+  # filesystem-cleanliness checks -- isolation is the precondition for a
+  # trustworthy result, not the point of the job. NOT folded into `test`
+  # above: pg_tle needs shared_preload_libraries (mixing pg_tle/non-pg_tle
+  # installs on one cluster can misbehave), so it needs its own dedicated
+  # cluster.
   #
   # SPECIAL CASES -- apply to one scenario, not the whole matrix:
   #
-  #   extension-update-test -- PG10 ONLY. The pre-0.2.2 install scripts
-  #                            (0.2.0/0.2.1) load on no other major (PG11
-  #                            added pg_attribute.attmissingval; PG12+ exposes
-  #                            oid in SELECT *; both trip up those old
-  #                            scripts), so this job's only remaining purpose
-  #                            is the 0.2.0->0.2.2, 0.2.1->0.2.2, and
-  #                            0.2.2->0.2.3 (view-rebuild) update scripts, on
-  #                            the one major that can still run them. Both
-  #                            0.2.0 and 0.2.1 are tested because ALTER
-  #                            EXTENSION UPDATE takes the SHORTEST path: a
-  #                            0.2.0 origin updates straight through
-  #                            0.2.0--0.2.2 and never touches 0.2.1--0.2.2, so
-  #                            0.2.1 is the only way to exercise that script.
-  #   pg-upgrade-test        -- BINARY pg_upgrade, SPECIFIC old_pg->new_pg
-  #                            jump pairs (every major is pg-upgrade-stepwise
-  #                            below): install an OLD version on an OLD
-  #                            major, binary-upgrade straight to a NEWER
-  #                            major (skipping intermediates), then update
-  #                            the extension -- proving objects created on an
-  #                            old server work when read on a new one. Every
-  #                            leg CLIMBS to a PostgreSQL that supports the
-  #                            current version, then updates and runs the
-  #                            full suite -- no leg stops short. A PG10/11
-  #                            origin HOLDS the extension at 0.2.3 (the
-  #                            highest version those majors can reach) until
-  #                            PG12+.
-  #   pg-tle-upgrade-test    -- The pg_tle-deployed equivalent of
-  #                            pg-upgrade-test, on the jump pairs within
-  #                            pg_tle's own supported PostgreSQL range.
-  #   pg-upgrade-stepwise    -- BINARY pg_upgrade, EVERY major in sequence:
-  #                            one cluster climbing 10 -> 11 -> ... -> 18,
-  #                            catching a regression specific to one
-  #                            major-to-major boundary that a big-jump leg
-  #                            (pg-upgrade-test) would skip.
+  # extension-update-test
+  # PG10 ONLY. The pre-0.2.2 install scripts (0.2.0/0.2.1) load on no other
+  # major (PG11 added pg_attribute.attmissingval; PG12+ exposes oid in
+  # SELECT *; both trip up those old scripts), so this job's only remaining
+  # purpose is the 0.2.0->0.2.2, 0.2.1->0.2.2, and 0.2.2->0.2.3
+  # (view-rebuild) update scripts, on the one major that can still run them.
+  # Both 0.2.0 and 0.2.1 are tested because ALTER EXTENSION UPDATE takes the
+  # SHORTEST path: a 0.2.0 origin updates straight through 0.2.0--0.2.2 and
+  # never touches 0.2.1--0.2.2, so 0.2.1 is the only way to exercise that
+  # script.
+  #
+  # pg-upgrade-test
+  # BINARY pg_upgrade, SPECIFIC old_pg->new_pg jump pairs (every major is
+  # pg-upgrade-stepwise below): install an OLD version on an OLD major,
+  # binary-upgrade straight to a NEWER major (skipping intermediates), then
+  # update the extension -- proving objects created on an old server work
+  # when read on a new one. Every leg CLIMBS to a PostgreSQL that supports
+  # the current version, then updates and runs the full suite -- no leg
+  # stops short. A PG10/11 origin HOLDS the extension at 0.2.3 (the highest
+  # version those majors can reach) until PG12+.
+  #
+  # pg-tle-upgrade-test
+  # The pg_tle-deployed equivalent of pg-upgrade-test, on the jump pairs
+  # within pg_tle's own supported PostgreSQL range.
+  #
+  # pg-upgrade-stepwise
+  # BINARY pg_upgrade, EVERY major in sequence: one cluster climbing
+  # 10 -> 11 -> ... -> 18, catching a regression specific to one
+  # major-to-major boundary that a big-jump leg (pg-upgrade-test) would
+  # skip.
   # ===========================================================================
   test:
     needs: [changes]
