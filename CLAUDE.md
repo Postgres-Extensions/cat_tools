@@ -8,14 +8,12 @@ After **every** push, monitor GitHub CI in a background subagent until all jobs 
 
 ## Where a test-matrix dimension belongs
 
-The full set of things we test is itself a matrix (PostgreSQL major, update path, pg_tle
-vs. filesystem, and — over time — more `make`-level test targets too). When adding a new
-dimension, prefer putting it in `make` over `ci.yml` whenever that's
-reasonable: it can then be run locally, and it never spins up an extra container/job. The
-one reason to prefer `ci.yml` instead is when a dimension genuinely needs its own
-isolated environment to mean anything (e.g. pg_tle's dedicated cluster, proving isolation
-holds) — `ci.yml` *can* batch multiple checks into one job, but doing that on purpose adds
-real complexity there, so default to `make` unless isolation is the actual point.
+The full set of things we test is itself a matrix (PostgreSQL major, UPDATE vs. CREATE
+EXTENSION, etc.). It's a real tradeoff, not a rule with one exception — but bias toward
+putting a new dimension in `make` over `ci.yml`: it can then be run locally, and it never
+spins up an extra container/job. Needing real isolation to mean anything (e.g. pg_tle's
+dedicated cluster) is one good reason to put a dimension in `ci.yml` instead, not the only
+possible one — weigh the actual tradeoff, just start from a bias toward `make`.
 
 ## Build/test system (pgxntool)
 
@@ -91,6 +89,11 @@ Write it accordingly:
   hard to *scan* is the actual problem: if there's enough detail to justify it, give the
   rest real structure (headers, bullet lists, separate sections for "what changed" vs.
   "how it was verified"), not one undifferentiated block of prose.
+- Watch for two habits specifically: being more verbose than the point actually needs —
+  structure alone doesn't fix over-length — and "leaking" context from how the work
+  evolved. An earlier idea that got revised or dropped before anything merged describes
+  the process, not the result; it doesn't belong in the description of what actually
+  shipped.
 
 ## SQL file conventions
 
