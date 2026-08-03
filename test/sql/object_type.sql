@@ -264,7 +264,6 @@ SELECT bag_eq(
 );
 
 \i test/finish.sql
-\i test/pgxntool/finish.sql
 
 --select name,setting from pg_settings where name ~ '^lc_';
 

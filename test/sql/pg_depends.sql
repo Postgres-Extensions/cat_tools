@@ -91,6 +91,5 @@ SELECT CASE
 SET LOCAL ROLE :"use_role";
 
 \i test/finish.sql
-\i test/pgxntool/finish.sql
 
 -- vi: expandtab ts=2 sw=2

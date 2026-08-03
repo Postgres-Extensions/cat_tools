@@ -27,4 +27,8 @@ SELECT ok(
     )
 );
 
+-- Chain through to pgxntool's own finish, same wrapping pattern as test/setup.sql
+-- does for test/pgxntool/setup.sql.
+\i test/pgxntool/finish.sql
+
 -- vi: expandtab ts=2 sw=2

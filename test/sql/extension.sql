@@ -76,6 +76,5 @@ SELECT throws_ok(
 );
 
 \i test/finish.sql
-\i test/pgxntool/finish.sql
 
 -- vi: expandtab ts=2 sw=2
