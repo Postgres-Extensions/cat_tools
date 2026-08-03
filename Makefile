@@ -152,24 +152,24 @@ test-update-schema:
 # there's no narrower behavior being given up here even in principle.
 .NOTPARALLEL: test test-schema test-update test-update-schema test-long test-all
 
-# The rule is simple inclusion, not a CI-cost judgment call: test-long is
-# every test-* target EXCEPT test itself, full stop -- currently test-update,
-# test-schema, test-update-schema. As new test-* targets get added, they just
-# join this prerequisite list, no redesign needed.
+# The rule is simple inclusion: test-long is every test-* target EXCEPT test
+# itself, full stop -- currently test-update, test-schema, test-update-schema.
+# New test-* targets just join this list, no redesign needed.
 #
-# test-long is NOT purely a local-dev target, though -- CI's `test` job calls
-# `make test-long` directly, on every supported PostgreSQL major (see that
-# job's step in ci.yml). So test-update's inclusion here means CI now also
-# re-proves part of what that same job's guard-proved update-scenario check
-# (a few lines later in the same step) already proves more thoroughly
-# (dependency-guard proof + structural diff against a fresh install) --
-# real, acknowledged overlap, not an oversight. It's kept anyway: a single
-# `make test` pass costs about a second, so one more of them per matrix leg
-# (test-long already ran test-schema/test-update-schema either way) is
-# negligible -- a wholly different class of cost from the SEPARATE JOB this
-# repo removed two rounds ago folding extension-update-test's PG12+ leg into
-# this same `test` job, which cost a full extra runner/container/checkout per
-# leg (~55s), not one more invocation inside a job already running.
+# test-long isn't purely local, though -- CI's `test` job calls `make
+# test-long` directly, on every supported PostgreSQL major, then runs
+# bin/test_existing's update-scenario check a few lines later in the same
+# step. test-update and update-scenario LOOK redundant (both update to the
+# current version and run the suite) but exercise different code paths, not
+# the same check twice: test-update drives test/install/load.sql's own
+# committed update branch (CREATE EXTENSION VERSION 0.2.2, then ALTER
+# EXTENSION UPDATE, inside the pre-suite install step); update-scenario
+# issues its ALTER EXTENSION UPDATE directly via psql, outside load.sql
+# entirely, then runs the suite in TEST_LOAD_SOURCE=existing mode (load.sql's
+# assert-only branch -- no CREATE/ALTER at all there). A bug in load.sql's
+# update-mode logic only test-update catches; a bug in the guard/
+# structural-diff logic only update-scenario catches. Keeping both is
+# correct coverage, not an accepted duplicate.
 #
 # Bare prerequisites, not sequential $(MAKE) calls in the recipe body --
 # simpler to read than repeating the same calls here and in each target's own
