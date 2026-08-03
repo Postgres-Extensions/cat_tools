@@ -97,11 +97,12 @@ TEST_SCHEMA ?=
 
 export PGOPTIONS := $(PGOPTIONS) -c cat_tools.test_load_mode=$(TEST_LOAD_SOURCE) -c cat_tools.test_update_from=$(TEST_UPDATE_FROM) -c cat_tools.test_update_to=$(TEST_UPDATE_TO) -c cat_tools.test_schema=$(TEST_SCHEMA)
 
-# Scope boundary (deliberate, not an oversight): CI's extension-update-test and
-# pg-upgrade-test jobs do NOT exercise TEST_SCHEMA at all yet -- they drive the
-# extension through bin/test_existing's own createdb/CREATE EXTENSION/ALTER
-# EXTENSION UPDATE flow, not this Makefile's TEST_LOAD_SOURCE path, so none of
-# the test-* targets below reach them either. See
+# Scope boundary (deliberate, not an oversight): CI's extension-update-test,
+# pg-upgrade-test, pg-tle-upgrade-test, pg-upgrade-stepwise, and pg-tle-test
+# jobs do NOT exercise TEST_SCHEMA at all yet -- they drive the extension
+# through bin/test_existing's own createdb/CREATE EXTENSION/ALTER EXTENSION
+# UPDATE flow, not this Makefile's TEST_LOAD_SOURCE path, so none of the
+# test-* targets below reach them either. See
 # https://github.com/Postgres-Extensions/cat_tools/issues/65 (still open --
 # these are local-dev-convenience targets, not a fix for that issue).
 #
