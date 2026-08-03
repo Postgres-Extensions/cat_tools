@@ -8,9 +8,9 @@ After **every** push, monitor GitHub CI in a background subagent until all jobs 
 
 ## Where a test-matrix dimension belongs
 
-The full set of things we test is itself a matrix (PostgreSQL major, update path, schema
-targeting, pg_tle vs. filesystem, and — over time — more `make`-level test targets too).
-When adding a new dimension, prefer putting it in `make` over `ci.yml` whenever that's
+The full set of things we test is itself a matrix (PostgreSQL major, update path, pg_tle
+vs. filesystem, and — over time — more `make`-level test targets too). When adding a new
+dimension, prefer putting it in `make` over `ci.yml` whenever that's
 reasonable: it can then be run locally, and it never spins up an extra container/job. The
 one reason to prefer `ci.yml` instead is when a dimension genuinely needs its own
 isolated environment to mean anything (e.g. pg_tle's dedicated cluster, proving isolation
