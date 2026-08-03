@@ -167,6 +167,14 @@ Always use block comment format for multi-line comments in SQL files:
 
 Never use `--` line comments for multi-line explanations.
 
+Be concise — humans have limited context too, not just AI. Say the point in as few words
+as it needs, not as many as the topic could support.
+
+Explain something at the *first* place it's mentioned, not somewhere later that assumes
+context the reader hasn't reached yet (exceptions need a reason). When a comment points
+to another spot in the same file, say `above` or `below` so the reader doesn't have to
+search both directions.
+
 ### Closing non-indentable blocks
 When closing a code block that cannot be indented to show its nesting (e.g. SQL
 `\endif`, `DO $$...$$`, shell heredocs, column-0 `fi`/`esac`) AND that block
