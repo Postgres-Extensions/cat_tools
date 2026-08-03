@@ -220,6 +220,7 @@ jobs:
           # supported = CURRENT_FLOOR..NEWEST (newest-first). The FRESH-install
           # matrix (test job, and pg-tle-test) runs exactly these.
           supported=$(seq "$NEWEST" -1 "$CURRENT_FLOOR")
+
           # climb = LEGACY_FLOOR+1 .. NEWEST (ascending). The stepwise job starts
           # one cluster on the legacy floor and binary-pg_upgrades through every
           # later major in turn, so its targets are every major above the floor.
@@ -231,10 +232,12 @@ jobs:
           json() { printf '%s\n' "$@" | paste -sd, - | sed 's/^/[/; s/$/]/'; }
 
           echo "supported_pg=$(json $supported)" >> "$GITHUB_OUTPUT"
+
           # extension-update-test is now PG10-only (its PG12+ leg folded into
           # the `test` job -- see that job's step), so it consumes legacy_pg
           # directly rather than a combined update_pg list (removed).
           echo "legacy_pg=$LEGACY_FLOOR" >> "$GITHUB_OUTPUT"
+
           # Space-separated for direct iteration in the stepwise bash loop.
           echo "climb_pg=$(echo $climb)" >> "$GITHUB_OUTPUT"
 
@@ -365,6 +368,7 @@ jobs:
           # Fail if the relkind drift source is empty (headers missing): the
           # drift check must actually run on every version, not pass silently.
           make check-relkind-source
+
           # The fresh/default-schema baseline: verify-results, this repo's
           # stricter, documented, pgtap-aware gate. base.mk declares
           # `verify-results: $(TEST_DEPS)`, not `verify-results: test` --
@@ -374,6 +378,7 @@ jobs:
           # Either way this runs the suite (via installcheck, one of
           # $(TEST_DEPS)) and then checks the pgtap/regression.diffs.
           make verify-results
+
           # test-long bundles the test-* targets that don't get their own CI
           # step: test-schema and test-update-schema (TEST_SCHEMA's
           # quoting-requiring pipeline, on the fresh and update paths --
@@ -388,6 +393,7 @@ jobs:
           # cost is container/cluster bring-up, not suite invocations). See
           # the Makefile's test-long/test-schema/test-update-schema comments.
           make test-long
+
           # The PG12+ guard-proved update-to-current check, folded in here
           # rather than run as its own matrix job (which extension-update-test
           # used to do, on these same PostgreSQL majors): this job's container
@@ -659,6 +665,7 @@ jobs:
         run: |
           pg_ctlcluster 10 test stop
           pg_dropcluster 10 test
+
           # -p 5432: force the well-known port (see pg-upgrade-test for why).
           pg_createcluster -p 5432 10 test -- $INITDB_OPTS
           pg_ctlcluster 10 test start
@@ -691,11 +698,13 @@ jobs:
           for new in $CLIMB_PG; do
             echo "=== binary pg_upgrade PostgreSQL $old -> $new ==="
             apt-get install -y postgresql-$new postgresql-server-dev-$new
+
             # PG_CONFIG explicit: several majors are installed, so the default
             # pg_config on PATH may not be $new's.
             make install PG_CONFIG=/usr/lib/postgresql/$new/bin/pg_config
             pg_ctlcluster $old test stop
             pg_createcluster -p 5432 $new test -- $INITDB_OPTS
+
             # PG17+ writes logs under the new datadir; older versions to CWD. Dump
             # both on failure (same handling as pg-upgrade-test).
             mkdir -p /tmp/pg_upgrade_logs
@@ -712,6 +721,7 @@ jobs:
                         -name '*.log' 2>/dev/null | sort | xargs -r tail -n +1; exit 1; }
             pg_ctlcluster $new test start
             pg_isready -t 30
+
             # Suite policy across the climb. We unfortunately CANNOT run the suite
             # against the OLD version (0.2.3) at the pre-PG12 steps (10->11, 11->12):
             # the suite matches the CURRENT version's objects and we do not maintain
