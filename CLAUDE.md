@@ -6,6 +6,15 @@ After **every** push, monitor GitHub CI in a background subagent until all jobs 
 
 (`.github/workflows/ci.yml`'s `changes` job computes the actual per-push changed file set and exposes `docs_only`; the heavy `test`, `pg-upgrade-test`, and `extension-update-test` jobs skip when `needs.changes.outputs.docs_only == 'true'` — i.e. every changed file in that push matches `**.md`/`**.asc`. Unlike the old workflow-level `paths-ignore`, this is evaluated per push/commit, not over the whole PR diff, so a doc-only commit on a PR that also touches code still gets the skip, and the workflow (including the required `all-checks-passed` check) always triggers and reports rather than being skipped outright by GitHub. When unsure, check `gh run list` for the pushed commit and monitor whatever run appears; if none does, there is nothing to watch.)
 
+## Where a test-matrix dimension belongs
+
+The full set of things we test is itself a matrix (PostgreSQL major, UPDATE vs. CREATE
+EXTENSION, etc.). It's a real tradeoff, not a rule with one exception — but bias toward
+putting a new dimension in `make` over `ci.yml`: it can then be run locally, and it never
+spins up an extra container/job. Needing real isolation to mean anything (e.g. pg_tle's
+dedicated cluster) is one good reason to put a dimension in `ci.yml` instead, not the only
+possible one — weigh the actual tradeoff, just start from a bias toward `make`.
+
 ## Build/test system (pgxntool)
 
 This repo's build is driven by pgxntool (embedded under `pgxntool/`). Its docs are
@@ -76,6 +85,15 @@ Write it accordingly:
 - Do NOT hard-wrap paragraphs: write each paragraph as a single long line (blank line
   between paragraphs). Hard-wrapping at ~80 columns conflicts with how GitHub builds the
   squash commit message from the description.
+- Length past the opening is fine — backstory and detail are often worth keeping. Being
+  hard to *scan* is the actual problem: if there's enough detail to justify it, give the
+  rest real structure (headers, bullet lists, separate sections for "what changed" vs.
+  "how it was verified"), not one undifferentiated block of prose.
+- Watch for two habits specifically: being more verbose than the point actually needs —
+  structure alone doesn't fix over-length — and "leaking" context from how the work
+  evolved. An earlier idea that got revised or dropped before anything merged describes
+  the process, not the result; it doesn't belong in the description of what actually
+  shipped.
 
 ## SQL file conventions
 
@@ -166,6 +184,17 @@ Always use block comment format for multi-line comments in SQL files:
 ```
 
 Never use `--` line comments for multi-line explanations.
+
+Be concise — humans have limited context too, not just AI. Say the point in as few words
+as it needs, not as many as the topic could support.
+
+Usually, explain something at the *first* place it's mentioned, not somewhere later that
+assumes context the reader hasn't reached yet — but this isn't absolute. One real
+exception: you're already in the middle of explaining A, and need to mention B (which
+also needs its own explanation) — stopping to fully explain B right there often confuses
+the explanation of A more than deferring B to its own natural spot would. Use judgment.
+When a comment points to another spot in the same file, say `above` or `below` so the
+reader doesn't have to search both directions.
 
 ### Closing non-indentable blocks
 When closing a code block that cannot be indented to show its nesting (e.g. SQL
