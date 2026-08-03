@@ -250,16 +250,17 @@ jobs:
   # major:
   #   1. FRESH install -- `make verify-results`, the baseline a brand-new
   #      user gets.
-  #   2. The GUARD-PROVED update-to-current check: bin/test_existing's
-  #      update-scenario -- CREATE EXTENSION at the 0.2.2 backward-compat
-  #      floor, ALTER EXTENSION UPDATE to current, structurally compare
-  #      against a fresh install, then run the full suite in existing mode.
-  #      USED to be its own matrix job (extension-update-test's PG12+ leg)
-  #      -- folded in here since it runs on the same majors as (1), and
-  #      this job's container, checkout, and cat_tools install are already
-  #      there; a separate job would pay for all of that again for no added
-  #      coverage. See that step's own comment for what was verified
-  #      locally before folding it in.
+  #   2. UPDATE TO CURRENT: bin/test_existing's update-scenario -- CREATE
+  #      EXTENSION at the 0.2.2 backward-compat floor, ALTER EXTENSION
+  #      UPDATE to current, structurally compare against a fresh install,
+  #      then run the full suite in existing mode. A planted dependency
+  #      guard blocks a stray non-CASCADE drop throughout, proving the
+  #      update didn't just quietly reinstall. USED to be its own matrix
+  #      job (extension-update-test's PG12+ leg) -- folded in here since it
+  #      runs on the same majors as (1), and this job's container, checkout,
+  #      and cat_tools install are already there; a separate job would pay
+  #      for all of that again for no added coverage. See that step's own
+  #      comment for what was verified locally before folding it in.
   #
   # pg-tle-test
   # The SAME majors, proving cat_tools actually works when deployed via
@@ -347,23 +348,24 @@ jobs:
           # documented check.
           make verify-results
 
-          # The guard-proved update-to-current check (see the Test strategy
-          # comment above). USED to be its own matrix job
-          # (extension-update-test's PG12+ leg) -- folded in here since it
-          # runs on these same majors, and this job's container, checkout,
-          # and cat_tools install are already there; a separate job would
-          # pay for all of that again for no added coverage.
+          # The update-to-current check (see the Test strategy comment
+          # above). USED to be its own matrix job (extension-update-test's
+          # PG12+ leg) -- folded in here since it runs on these same majors,
+          # and this job's container, checkout, and cat_tools install are
+          # already there; a separate job would pay for all of that again
+          # for no added coverage.
           # update-scenario creates its own database (cat_tools_update, not
           # pg_regress's own throwaway db from verify-results above --
-          # confirmed no name collision), plants + proves the dependency
-          # guard, ALTER EXTENSION UPDATEs 0.2.2 to current, structurally
-          # compares the result against a fresh install (assert_matches_fresh,
-          # via bin/structural_diff), and runs the full suite against it in
-          # existing mode. Reusing the SAME suite and expected output asserts
-          # the updated database behaves identically to a fresh install. See
-          # extension-update-test below for the PG10-only legacy checks this
-          # does NOT cover (those pre-0.2.2 scripts don't load on PG12+ at
-          # all).
+          # confirmed no name collision), plants a dependency guard (proving
+          # a stray non-CASCADE drop is blocked throughout, not just that
+          # the update ran), ALTER EXTENSION UPDATEs 0.2.2 to current,
+          # structurally compares the result against a fresh install
+          # (assert_matches_fresh, via bin/structural_diff), and runs the
+          # full suite against it in existing mode. Reusing the SAME suite
+          # and expected output asserts the updated database behaves
+          # identically to a fresh install. See extension-update-test below
+          # for the PG10-only legacy checks this does NOT cover (those
+          # pre-0.2.2 scripts don't load on PG12+ at all).
           #
           # Verified locally before folding it in: ran `make
           # check-relkind-source && make verify-results && bin/test_existing
