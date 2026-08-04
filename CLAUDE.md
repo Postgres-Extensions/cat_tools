@@ -4,7 +4,7 @@
 
 After **every** push, monitor GitHub CI in a background subagent until all jobs pass or a failure is confirmed. Use `gh pr checks <pr> --watch` when the branch has an open PR; otherwise (a branch with no PR yet, or a push to `master`) use `gh run watch` for the pushed commit. Investigate and fix failures immediately rather than leaving them for the user to notice.
 
-(`.github/workflows/ci.yml`'s `changes` job computes the actual per-push changed file set and exposes `docs_only`; the heavy `test`, `pg-upgrade-test`, and `extension-update-test` jobs skip when `needs.changes.outputs.docs_only == 'true'` — i.e. every changed file in that push matches `**.md`/`**.asc`. Unlike the old workflow-level `paths-ignore`, this is evaluated per push/commit, not over the whole PR diff, so a doc-only commit on a PR that also touches code still gets the skip, and the workflow (including the required `all-checks-passed` check) always triggers and reports rather than being skipped outright by GitHub. When unsure, check `gh run list` for the pushed commit and monitor whatever run appears; if none does, there is nothing to watch.)
+(`.github/workflows/ci.yml`'s `changes` job computes the actual per-push changed file set and exposes `docs_only`; the heavy `test`, `pg-upgrade-test`, and `legacy-extension-update-test` jobs skip when `needs.changes.outputs.docs_only == 'true'` — i.e. every changed file in that push matches `**.md`/`**.asc`. Unlike the old workflow-level `paths-ignore`, this is evaluated per push/commit, not over the whole PR diff, so a doc-only commit on a PR that also touches code still gets the skip, and the workflow (including the required `all-checks-passed` check) always triggers and reports rather than being skipped outright by GitHub. When unsure, check `gh run list` for the pushed commit and monitor whatever run appears; if none does, there is nothing to watch.)
 
 ## Where a test-matrix dimension belongs
 
@@ -145,12 +145,15 @@ parse-time error):
 
 ### CI jobs
 
-- `extension-update-test` exercises the widest update path we support — `0.2.2` → current
-  in `update` mode — on `pg: [12..18]`, plus a PG10-only leg that exercises the pre-0.2.2
-  update scripts (`0.2.0`→`0.2.2` and `0.2.1`→`0.2.2`, which install only on PG10 and target
-  `0.2.2`, not the current version). `0.2.2` is the update-from floor only for backward-compat:
-  the 0.2.0/0.2.1 install scripts fail on PG11+/PG12+. PG12 is the PostgreSQL floor — PG11 and
-  earlier cannot run `ALTER TYPE ... ADD VALUE` in extension update scripts (lifted in PG12).
+- `test` also runs the widest update path we support — `bin/test_existing update-scenario`
+  installs `0.2.2`, `ALTER EXTENSION UPDATE`s to current, structurally diffs against a fresh
+  install, then runs the full suite in `existing` mode — on every major it already covers
+  (`pg: [12..18]`). PG12 is the floor for this path — PG11 and earlier cannot run
+  `ALTER TYPE ... ADD VALUE` in extension update scripts (lifted in PG12).
+- `legacy-extension-update-test` is PG10-only: it exercises the pre-0.2.2 update scripts
+  (`0.2.0`→`0.2.2` and `0.2.1`→`0.2.2`, which install only on PG10 and target `0.2.2`, not the
+  current version) plus the `0.2.2`→`0.2.3` view-rebuild. `0.2.2` is the update-from floor only
+  for backward-compat: the 0.2.0/0.2.1 install scripts fail on PG11+/PG12+.
 - `pg-upgrade-test` binary-`pg_upgrade`s a real database and then runs the suite against it
   in `existing` mode. Two shapes:
   - `old_pg>=11`: install `0.2.2` directly → plant guard → pg_upgrade → update to current.

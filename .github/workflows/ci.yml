@@ -43,7 +43,6 @@ jobs:
       last_tested_url: ${{ steps.last_tested.outputs.last_tested_url }}
       # Derived PG-major lists (see the "Derive ..." step for their meaning).
       supported_pg: ${{ steps.pg.outputs.supported_pg }}
-      update_pg: ${{ steps.pg.outputs.update_pg }}
       climb_pg: ${{ steps.pg.outputs.climb_pg }}
       legacy_pg: ${{ steps.pg.outputs.legacy_pg }}
     steps:
@@ -193,16 +192,17 @@ jobs:
         id: pg
         run: |
           # Spending 20+ lines to replace a handful of version references looks
-          # silly on the surface, but the point is CONSISTENCY: every job -- the
-          # fresh-install `test` matrix, the `extension-update-test` matrix and
-          # the stepwise climb -- derives its PostgreSQL set from this ONE source,
-          # so they cannot drift onto different version lists.
+          # silly on the surface, but the point is CONSISTENCY: every job below
+          # (the `test`/`pg-tle-test` matrix, `legacy-extension-update-test`'s single
+          # legacy major, and the stepwise climb) derives its PostgreSQL set
+          # from this ONE source, so they cannot drift onto different version
+          # lists.
           #
           # SINGLE SOURCE OF TRUTH for the supported PostgreSQL majors. To add
-          # or drop a PG major, edit ONLY the three constants below; the test,
-          # extension-update-test and pg-upgrade-stepwise jobs all derive their
-          # version lists from them (adding the newest major is a one-line NEWEST
-          # bump). Do NOT hardcode a supported major in any job matrix or loop.
+          # or drop a PG major, edit ONLY the three constants below; every job
+          # derives its version list from them (adding the newest major is a
+          # one-line NEWEST bump). Do NOT hardcode a supported major in any job
+          # matrix or loop.
           #
           #   NEWEST        -- highest PostgreSQL major cat_tools is tested on.
           #   CURRENT_FLOOR -- oldest major the CURRENT extension version supports:
@@ -211,8 +211,9 @@ jobs:
           #   LEGACY_FLOOR  -- oldest major the pre-0.2.2 install scripts still
           #                    load on (PG11 added pg_attribute.attmissingval and
           #                    PG12+ exposes the oid system column in SELECT *, both
-          #                    of which those old scripts trip over). Only the
-          #                    update and stepwise paths reach back this far.
+          #                    of which those old scripts trip over). Only
+          #                    legacy-extension-update-test and the stepwise path reach
+          #                    back this far.
           NEWEST=18
           CURRENT_FLOOR=12
           LEGACY_FLOOR=10
@@ -220,9 +221,6 @@ jobs:
           # supported = CURRENT_FLOOR..NEWEST (newest-first). The FRESH-install
           # matrix (test job) runs exactly these.
           supported=$(seq "$NEWEST" -1 "$CURRENT_FLOOR")
-          # update = supported plus the legacy floor: the extension-update job
-          # additionally exercises the PG10-only pre-0.2.2 update scripts.
-          update="$supported $LEGACY_FLOOR"
           # climb = LEGACY_FLOOR+1 .. NEWEST (ascending). The stepwise job starts
           # one cluster on the legacy floor and binary-pg_upgrades through every
           # later major in turn, so its targets are every major above the floor.
@@ -234,7 +232,6 @@ jobs:
           json() { printf '%s\n' "$@" | paste -sd, - | sed 's/^/[/; s/$/]/'; }
 
           echo "supported_pg=$(json $supported)" >> "$GITHUB_OUTPUT"
-          echo "update_pg=$(json $update)" >> "$GITHUB_OUTPUT"
           echo "legacy_pg=$LEGACY_FLOOR" >> "$GITHUB_OUTPUT"
           # Space-separated for direct iteration in the stepwise bash loop.
           echo "climb_pg=$(echo $climb)" >> "$GITHUB_OUTPUT"
@@ -246,9 +243,19 @@ jobs:
   # differently, so each is exercised by its own job below (the per-job
   # comments carry the details; this is the big picture):
   #
-  # The `test` job runs a FRESH install: CREATE EXTENSION at the current
-  # version, on every supported PostgreSQL major. The baseline a brand-new
-  # user gets.
+  # The `test` job runs two checks, on every supported PostgreSQL major:
+  #   1. FRESH install -- CREATE EXTENSION at the current version, via
+  #      `make verify-results`. The baseline a brand-new user gets.
+  #   2. UPDATE TO CURRENT -- bin/test_existing's update-scenario: CREATE
+  #      EXTENSION at the 0.2.2 backward-compat floor, ALTER EXTENSION
+  #      UPDATE to current, structurally compare against a fresh install,
+  #      then run the full suite in existing mode. A planted dependency
+  #      guard blocks a stray non-CASCADE drop throughout, proving the
+  #      update didn't just quietly reinstall. USED to be its own matrix job
+  #      (legacy-extension-update-test's PG12+ leg) -- folded in here since it runs
+  #      on the same majors as (1), and this job's container, checkout, and
+  #      cat_tools install are already there; a separate job would pay for
+  #      all of that again for no added coverage.
   #
   # The `pg-upgrade-test` job does a BINARY pg_upgrade, SINGLE jump: install
   # an OLD version on an OLD major, binary-upgrade the cluster straight to a
@@ -259,23 +266,29 @@ jobs:
   # sequence: one cluster climbing 10 -> 11 -> ... -> 18, exercising each
   # individual major-to-major transition in turn.
   #
-  # The `extension-update-test` job proves an IN-PLACE update: CREATE
-  # EXTENSION at an OLD version then ALTER EXTENSION UPDATE (same
-  # PostgreSQL, no pg_upgrade).
+  # The `legacy-extension-update-test` job is PG10 ONLY now (see the changes job's
+  # LEGACY_FLOOR comment): the pre-0.2.2 install scripts (0.2.0/0.2.1) load
+  # on no other major, so this job's only remaining purpose is the
+  # 0.2.0->0.2.2, 0.2.1->0.2.2, and 0.2.2->0.2.3 (view-rebuild) update
+  # scripts, on the one major that can still run them. USED to also cover
+  # the PG12+ update-to-current check across the full matrix -- that leg
+  # moved into `test` above (see (2) there), since it ran on the same
+  # majors as `test`'s own fresh-install check and didn't need a separate
+  # job.
   #
   # The `pg-tle-test` job covers the SAME majors as `test`, proving cat_tools
   # actually works when deployed via pg_tle (AWS's Trusted Language
   # Extensions) instead of a filesystem .control file -- the same
-  # fresh-install and update-path scenarios `test`/extension-update-test
-  # prove for a filesystem install, run again through pg_tle's own
-  # registration. That proof only means what it claims if pg_tle ISOLATION
-  # holds throughout the run (a stale filesystem .control file silently wins
-  # over a pg_tle registration of the same name -- PostgreSQL just resolves
-  # from disk instead of erroring), so every step here is bracketed by
-  # filesystem-cleanliness checks -- isolation is the precondition for a
-  # trustworthy result, not the point of the job. NOT folded into `test`:
-  # pg_tle needs shared_preload_libraries (mixing pg_tle/non-pg_tle installs
-  # on one cluster can misbehave), so it needs its own dedicated cluster.
+  # fresh-install and update-path scenarios `test` proves for a filesystem
+  # install, run again through pg_tle's own registration. That proof only
+  # means what it claims if pg_tle ISOLATION holds throughout the run (a
+  # stale filesystem .control file silently wins over a pg_tle registration
+  # of the same name -- PostgreSQL just resolves from disk instead of
+  # erroring), so every step here is bracketed by filesystem-cleanliness
+  # checks -- isolation is the precondition for a trustworthy result, not
+  # the point of the job. NOT folded into `test`: pg_tle needs
+  # shared_preload_libraries (mixing pg_tle/non-pg_tle installs on one
+  # cluster can misbehave), so it needs its own dedicated cluster.
   #
   # The `pg-tle-upgrade-test` job is the pg_tle-deployed equivalent of
   # `pg-upgrade-test`, on the jump pairs within pg_tle's own supported
@@ -338,6 +351,31 @@ jobs:
           # (pgxntool 2.3.0+), but verify-results is the stricter, documented
           # check.
           make verify-results
+
+          # The update-to-current check (see the Test strategy comment
+          # above). USED to be its own matrix job (legacy-extension-update-test's
+          # PG12+ leg) -- folded in here since it runs on these same majors,
+          # and this job's container, checkout, and cat_tools install are
+          # already there; a separate job would pay for all of that again
+          # for no added coverage.
+          #
+          # NOT equivalent to `make test-update` (install 0.2.2 -> ALTER
+          # EXTENSION UPDATE -> run the suite, all inside pg_regress's own
+          # throwaway db). update-scenario creates its own database
+          # (cat_tools_update, not pg_regress's throwaway db from
+          # verify-results above -- confirmed no name collision), ALSO
+          # plants a dependency guard (proving a stray non-CASCADE drop
+          # stays blocked through the update, not just that the update
+          # itself ran) and structurally compares the result against a
+          # fresh install (assert_matches_fresh, via bin/structural_diff) --
+          # see bin/test_existing's own header for why -- before running
+          # the full suite against the real updated database in existing
+          # mode. Reusing the SAME suite and expected output asserts the
+          # updated database behaves identically to a fresh install. See
+          # legacy-extension-update-test below for the PG10-only legacy checks
+          # this does NOT cover (those pre-0.2.2 scripts don't load on
+          # PG12+ at all).
+          bin/test_existing update-scenario cat_tools_update 0.2.2
 
   # Style linter (https://github.com/Postgres-Extensions/linter, vendored at
   # .vendor/linter). Deliberately checked out WITHOUT submodules -- `make
@@ -660,89 +698,63 @@ jobs:
             old=$new
           done
 
-  # Proves the in-place extension update path: CREATE EXTENSION at an OLD cat_tools
-  # version then ALTER EXTENSION UPDATE (no pg_upgrade, same PostgreSQL). On PG12+
-  # it updates 0.2.2 -> current and runs the FULL suite against the updated
-  # database (same expected output as a fresh install, so an updated DB must behave
-  # identically). The PG10 leg only exercises the pre-0.2.2 update scripts, the
-  # sole version where they still load. Complements pg-upgrade-test, which covers
-  # the cross-major-version binary upgrade instead.
-  extension-update-test:
+  # Proves the pre-0.2.2 legacy install/update scripts: CREATE EXTENSION at
+  # 0.2.0/0.2.1 then ALTER EXTENSION UPDATE (no pg_upgrade). PG10 ONLY -- see
+  # the Test strategy comment above for why, and why the PG12+ update-to-
+  # current leg lives in the `test` job instead of here.
+  legacy-extension-update-test:
     # Gated behind test+lint -- see the comment on pg-upgrade-test's needs.
     needs: [changes, test, lint]
     if: success() && needs.changes.outputs.docs_only != 'true'
-    strategy:
-      matrix:
-        # PG12+: exercise the WIDEST update path we support — CREATE EXTENSION at
-        # the 0.2.2 backward-compat floor, ALTER EXTENSION UPDATE to the CURRENT
-        # version, and run the full suite against the updated database. 0.2.2 is
-        # the floor because the 0.2.0/0.2.1 install scripts fail on PG11+/PG12+;
-        # PG12 is the PostgreSQL floor because the update runs
-        # `ALTER TYPE ... ADD VALUE`, which PG11 and below cannot run in an
-        # extension update script (lifted in PG12).
-        # PG10: the ONLY version where the pre-0.2.2 install scripts still load,
-        # so the only place the 0.2.0->0.2.2 and 0.2.1->0.2.2 update scripts and
-        # the 0.2.2->0.2.3 view rebuild on the broken path can be exercised. They
-        # target 0.2.2/0.2.3 (not the current version) and use no
-        # ALTER TYPE ... ADD VALUE, so they run on PG10. The PG10 leg runs only
-        # those legacy checks — not the current-version suite (the current version
-        # needs PG12+: the 0.2.3->0.3.0 update adds enum values via ALTER TYPE ...
-        # ADD VALUE, unrunnable in a pre-PG12 transaction). See the per-step `if`
-        # guards.
-        #
-        # Current-supported majors + the legacy PG10 floor, from the single
-        # source in the changes job (update_pg = supported_pg plus legacy_pg).
-        pg: ${{ fromJSON(needs.changes.outputs.update_pg) }}
-    name: ⬆️ Extension update test on PostgreSQL ${{ matrix.pg }}
+    # Single source of truth for the legacy PG10 floor: needs.changes.outputs.legacy_pg,
+    # not a hardcoded '10'.
+    env:
+      LEGACY_PG: ${{ needs.changes.outputs.legacy_pg }}
+    name: ⬆️ Legacy extension update test on PostgreSQL ${{ needs.changes.outputs.legacy_pg }}
     runs-on: ubuntu-latest
     container: pgxn/pgxn-tools
     steps:
-      - name: Start PostgreSQL ${{ matrix.pg }}
-        run: pg-start ${{ matrix.pg }}
+      - name: Start PostgreSQL ${{ env.LEGACY_PG }}
+        run: pg-start ${{ env.LEGACY_PG }}
       - name: Check out the repo
         uses: actions/checkout@v6
-      - name: Install rsync and server headers
-        # server-dev provides catalog/pg_class.h for the relkind drift check
-        # (see the "test" job); required so check-relkind-source below passes.
-        # PG10 runs only the legacy-script checks (no suite), so it needs no headers.
-        if: matrix.pg != '10'
-        run: apt-get install -y rsync postgresql-server-dev-${{ matrix.pg }}
       - name: Install rsync
-        if: matrix.pg == '10'
+        # No server-dev header package here: this job runs no suite (see the
+        # job comment above), so nothing needs the relkind drift check.
         run: apt-get install -y rsync
       - name: Install cat_tools (all versions)
         run: make install
-      - name: Test pre-0.2.2 update scripts + 0.2.2→0.2.3 rebuild (PG10 only)
-        # 0.2.0/0.2.1 install only on PG10; their update scripts target 0.2.2 (not
-        # the current version) and are otherwise never exercised. Both origins are
-        # checked because ALTER EXTENSION UPDATE takes the shortest path (see the
-        # pg-upgrade-test matrix): 0.2.0 goes via the 0.2.0--0.2.2 script, 0.2.1 via
-        # 0.2.1--0.2.2. update-check-version asserts each lands on 0.2.2 -- NOT
-        # plain update-check: landing on 0.2.2 from these origins is a KNOWN
-        # divergence from a fresh 0.2.2 install (trigger__parse and the
-        # pg_class_v omit_column bug, repaired in 0.2.2->0.2.3; a type-ACL gap,
-        # repaired only in 0.2.3->0.3.0), and both 0.2.0->0.2.2 / 0.2.1->0.2.2
-        # are already-published scripts that cannot be edited to fix it
+      - name: Test pre-0.2.2 update scripts + 0.2.2→0.2.3 rebuild
+        # 0.2.0/0.2.1 install only on PG10; their update scripts target 0.2.2
+        # (not the current version) and are otherwise never exercised. Both
+        # origins are checked because ALTER EXTENSION UPDATE takes the
+        # shortest path (see pg-upgrade-test above): 0.2.0 goes via the
+        # 0.2.0--0.2.2 script, 0.2.1 via 0.2.1--0.2.2. update-check-version
+        # asserts each lands on 0.2.2 -- NOT plain update-check: landing on
+        # 0.2.2 from these origins is a KNOWN divergence from a fresh 0.2.2
+        # install (trigger__parse and the pg_class_v omit_column bug,
+        # repaired in 0.2.2->0.2.3; a type-ACL gap, repaired only in
+        # 0.2.3->0.3.0), and both 0.2.0->0.2.2 / 0.2.1->0.2.2 are
+        # already-published scripts that cannot be edited to fix it
         # directly, so asserting fresh-parity here would fail forever by
-        # design. No suite runs (the current version needs PG12+).
+        # design.
         #
-        # The rebuild_020/rebuild_021 checks exercise the REAL broken path end to
-        # end from BOTH pre-0.2.2 origins: a 0.2.0 (resp. 0.2.1) install on PG10
-        # leaves relhasoids in _cat_tools.pg_class_v (the buggy 0.2.0--0.2.2 /
-        # 0.2.1--0.2.2 omit_column no-op), and updating to 0.2.3 routes through
-        # 0.2.2--0.2.3 (shortest path <origin>--0.2.2 then 0.2.2--0.2.3), firing
-        # the conditional rebuild that strips relhasoids and the trigger__parse
-        # repair. It stays update-check-version, not plain update-check: 0.2.3
-        # is ALSO already-published (tagged), so the type-ACL gap above is not
-        # (and cannot be) fixed until 0.2.3->0.3.0 either -- this landing point
-        # still diverges from a fresh 0.2.3 install on that ACL alone. 0.2.3 is
-        # the furthest PG10 can reach (0.2.3--0.3.0 needs PG12+). On PG12+
-        # relhasoids never existed, so only PG10 exercises the rebuild. The
+        # The rebuild_020/rebuild_021 checks exercise the REAL broken path
+        # end to end from BOTH pre-0.2.2 origins: a 0.2.0 (resp. 0.2.1)
+        # install leaves relhasoids in _cat_tools.pg_class_v (the buggy
+        # 0.2.0--0.2.2 / 0.2.1--0.2.2 omit_column no-op), and updating to
+        # 0.2.3 routes through 0.2.2--0.2.3 (shortest path <origin>--0.2.2
+        # then 0.2.2--0.2.3), firing the conditional rebuild that strips
+        # relhasoids and the trigger__parse repair. It stays
+        # update-check-version, not plain update-check: 0.2.3 is ALSO
+        # already-published (tagged), so the type-ACL gap above is not (and
+        # cannot be) fixed until 0.2.3->0.3.0 either -- this landing point
+        # still diverges from a fresh 0.2.3 install on that ACL alone. 0.2.3
+        # is the furthest PG10 can reach (0.2.3--0.3.0 needs PG12+). The
         # psql assertion fails loudly if the rebuild did not fire (relhasoids
-        # still present) -- complementing the stronger 10→18 pg_upgrade bridge
-        # legs. `$$` is escaped as `\$\$` so the shell passes literal dollar
-        # quotes through to psql.
-        if: matrix.pg == '10'
+        # still present) -- complementing the stronger 10→18 pg_upgrade
+        # bridge legs. `$$` is escaped as `\$\$` so the shell passes literal
+        # dollar quotes through to psql.
         run: |
           bin/test_existing update-check-version cat_tools_from_020 0.2.0 0.2.2
           bin/test_existing update-check-version cat_tools_from_021 0.2.1 0.2.2
@@ -752,15 +764,6 @@ jobs:
             bin/test_existing update-check-version "$db" "$from" 0.2.3
             psql -d "$db" -v ON_ERROR_STOP=1 -c "DO \$\$ BEGIN IF EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid='_cat_tools.pg_class_v'::regclass AND attname='relhasoids' AND NOT attisdropped AND attnum>0) THEN RAISE EXCEPTION 'pg_class_v still exposes relhasoids after update through 0.2.2->0.2.3 -- rebuild did not fire'; END IF; END \$\$"
           done
-      - name: Update 0.2.2 → current and run the suite (existing mode, PG12+)
-        # update-scenario creates a real database at 0.2.2, plants + proves the
-        # dependency guard, ALTER EXTENSION UPDATEs to the current version, and
-        # runs the suite against that updated database in existing mode (asserting
-        # the version and that the guard still blocks a drop). Reusing the SAME
-        # suite and expected output asserts the updated database behaves
-        # identically to a fresh install.
-        if: matrix.pg != '10'
-        run: bin/test_existing update-scenario cat_tools_update 0.2.2
 
   pg-tle-test:
     # Gated behind test+lint -- see the comment on pg-upgrade-test's needs.
@@ -874,7 +877,7 @@ jobs:
         # smoke test above never runs the full suite.
         run: apt-get install -y postgresql-server-dev-${{ matrix.pg }}
       - name: Test the update path via pg_tle (full pgTAP suite, --use-existing)
-        # Exercises the SAME update path extension-update-test proves for a
+        # Exercises the SAME update path the `test` job proves for a
         # filesystem install (0.2.2 -> current), but entirely through pg_tle.
         # bin/test_existing's update_scenario is UNMODIFIED from the
         # filesystem case -- only run_suite's internals differ, gated by this
@@ -1016,7 +1019,7 @@ jobs:
   # the heavy jobs gated off by the `changes` job on a docs-only push), and
   # fails if any failed or were cancelled.
   all-checks-passed:
-    needs: [changes, test, lint, verify-cancel-on-close-coupling, pg-upgrade-test, pg-upgrade-stepwise, extension-update-test, pg-tle-test, pg-tle-upgrade-test]
+    needs: [changes, test, lint, verify-cancel-on-close-coupling, pg-upgrade-test, pg-upgrade-stepwise, legacy-extension-update-test, pg-tle-test, pg-tle-upgrade-test]
     if: always()
     runs-on: ubuntu-latest
     steps:
