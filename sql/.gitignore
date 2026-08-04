@@ -5,3 +5,7 @@ cat_tools.sql
 cat_tools--*.sql
 # Historical exceptions — no .sql.in source; must be tracked directly.
 !cat_tools--0.1.*.sql
+# The `stable` pseudo-version's .sql.in snapshot is pure derived output (a byte-for-byte
+# copy of cat_tools.sql.in, regenerated on every `make`), unlike a real release's
+# .sql.in -- so, unusually, it's ignored too rather than tracked.
+cat_tools--stable.sql.in

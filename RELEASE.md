@@ -64,6 +64,11 @@ what that version actually shipped.
 > moment this release is merged you **MUST** flip `default_version` back to `stable` on
 > master (step 7). If you forget, the next source edit on master will regenerate — and
 > corrupt — the just-released version's install file.
+>
+> `sql/cat_tools--<version>.sql.in` must ALWAYS be tracked — that's the entire point,
+> keeping a real history of the extension across releases. `stable` is the ONE exception
+> (its `.sql.in` is gitignored, not tracked) for the ONE reason that `stable` itself is
+> never actually released, so there's no history to keep.
 
 - [ ] Bump `default_version` in `cat_tools.control` (bumped by hand).
 - [ ] Bump the version in `META.in.json` — the source of truth is
@@ -118,10 +123,9 @@ what that version actually shipped.
       `STABLE` section in `HISTORY.asc`, and re-seed a fresh
       `sql/cat_tools--<this-release>--stable.sql.in` update script for the next cycle.
       Leaving master stamped at the real version means the next source edit regenerates
-      and corrupts the released version's install file.
-- [ ] `rm` any stale generated `sql/cat_tools--<released-version>.sql.in` /
-      `cat_tools--<released-version>.sql` left in the tree — once `default_version` is
-      `stable`, `make` no longer regenerates them, so they are one-time cleanup.
+      and corrupts the released version's install file. The just-released
+      `sql/cat_tools--<version>.sql.in` stays tracked, permanently — nothing to clean up
+      or remove there; see step 4's note above.
 
 > The persistent `stable` pseudo-version (a permanent version literally named `stable`,
 > with a live `sql/cat_tools--<last-release>--stable.sql.in` update script that every

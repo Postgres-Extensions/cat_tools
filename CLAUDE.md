@@ -112,6 +112,15 @@ Rules for what to track in git:
 4. EXCEPTION to rule 2: a version that changes little AND ships no nontrivial update-path machinery MAY omit its generated install script (little test-coverage value; it is regenerated from `sql/cat_tools.sql.in` at build time). Track it whenever the version carries meaningful changes or a nontrivial update script — a complex update warrants the committed install script for update-test coverage and provenance.
 5. Version-specific files MUST NEVER be edited manually — always edit `sql/cat_tools.sql.in`
    and regenerate.
+6. EXCEPTION to rule 2 (and to pgxntool's own "don't `.gitignore` a skipped version, `rm`
+   it once" guidance — `pgxntool/README.asc`, "Don't `.gitignore` a Skipped Version"):
+   `sql/cat_tools--stable.sql.in` (the pseudo-version `default_version` sits at between
+   releases, see RELEASE.md) IS gitignored, not tracked. That guidance is about a version
+   that's normally tracked but occasionally skipped — a one-time, transient leftover file.
+   `stable` is the opposite case: it's *permanently* current between releases, so unlike a
+   skipped version it would be regenerated and re-diffed on every single source edit if
+   tracked, for zero test-coverage value (CI already builds+tests a fresh install from
+   source on every push regardless). See `sql/.gitignore`'s comment and RELEASE.md step 4.
 
 ## CI: PostgreSQL version support
 
