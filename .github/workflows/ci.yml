@@ -193,7 +193,7 @@ jobs:
         run: |
           # Spending 20+ lines to replace a handful of version references looks
           # silly on the surface, but the point is CONSISTENCY: every job below
-          # (the `test`/`pg-tle-test` matrix, `extension-update-test`'s single
+          # (the `test`/`pg-tle-test` matrix, `legacy-extension-update-test`'s single
           # legacy major, and the stepwise climb) derives its PostgreSQL set
           # from this ONE source, so they cannot drift onto different version
           # lists.
@@ -212,7 +212,7 @@ jobs:
           #                    load on (PG11 added pg_attribute.attmissingval and
           #                    PG12+ exposes the oid system column in SELECT *, both
           #                    of which those old scripts trip over). Only
-          #                    extension-update-test and the stepwise path reach
+          #                    legacy-extension-update-test and the stepwise path reach
           #                    back this far.
           NEWEST=18
           CURRENT_FLOOR=12
@@ -252,7 +252,7 @@ jobs:
   #      then run the full suite in existing mode. A planted dependency
   #      guard blocks a stray non-CASCADE drop throughout, proving the
   #      update didn't just quietly reinstall. USED to be its own matrix job
-  #      (extension-update-test's PG12+ leg) -- folded in here since it runs
+  #      (legacy-extension-update-test's PG12+ leg) -- folded in here since it runs
   #      on the same majors as (1), and this job's container, checkout, and
   #      cat_tools install are already there; a separate job would pay for
   #      all of that again for no added coverage.
@@ -266,7 +266,7 @@ jobs:
   # sequence: one cluster climbing 10 -> 11 -> ... -> 18, exercising each
   # individual major-to-major transition in turn.
   #
-  # The `extension-update-test` job is PG10 ONLY now (see the changes job's
+  # The `legacy-extension-update-test` job is PG10 ONLY now (see the changes job's
   # LEGACY_FLOOR comment): the pre-0.2.2 install scripts (0.2.0/0.2.1) load
   # on no other major, so this job's only remaining purpose is the
   # 0.2.0->0.2.2, 0.2.1->0.2.2, and 0.2.2->0.2.3 (view-rebuild) update
@@ -353,7 +353,7 @@ jobs:
           make verify-results
 
           # The update-to-current check (see the Test strategy comment
-          # above). USED to be its own matrix job (extension-update-test's
+          # above). USED to be its own matrix job (legacy-extension-update-test's
           # PG12+ leg) -- folded in here since it runs on these same majors,
           # and this job's container, checkout, and cat_tools install are
           # already there; a separate job would pay for all of that again
@@ -372,7 +372,7 @@ jobs:
           # the full suite against the real updated database in existing
           # mode. Reusing the SAME suite and expected output asserts the
           # updated database behaves identically to a fresh install. See
-          # extension-update-test below for the PG10-only legacy checks
+          # legacy-extension-update-test below for the PG10-only legacy checks
           # this does NOT cover (those pre-0.2.2 scripts don't load on
           # PG12+ at all).
           bin/test_existing update-scenario cat_tools_update 0.2.2
@@ -702,7 +702,7 @@ jobs:
   # 0.2.0/0.2.1 then ALTER EXTENSION UPDATE (no pg_upgrade). PG10 ONLY -- see
   # the Test strategy comment above for why, and why the PG12+ update-to-
   # current leg lives in the `test` job instead of here.
-  extension-update-test:
+  legacy-extension-update-test:
     # Gated behind test+lint -- see the comment on pg-upgrade-test's needs.
     needs: [changes, test, lint]
     if: success() && needs.changes.outputs.docs_only != 'true'
@@ -710,7 +710,7 @@ jobs:
     # not a hardcoded '10'.
     env:
       LEGACY_PG: ${{ needs.changes.outputs.legacy_pg }}
-    name: ⬆️ Extension update test on PostgreSQL ${{ needs.changes.outputs.legacy_pg }}
+    name: ⬆️ Legacy extension update test on PostgreSQL ${{ needs.changes.outputs.legacy_pg }}
     runs-on: ubuntu-latest
     container: pgxn/pgxn-tools
     steps:
@@ -1019,7 +1019,7 @@ jobs:
   # the heavy jobs gated off by the `changes` job on a docs-only push), and
   # fails if any failed or were cancelled.
   all-checks-passed:
-    needs: [changes, test, lint, verify-cancel-on-close-coupling, pg-upgrade-test, pg-upgrade-stepwise, extension-update-test, pg-tle-test, pg-tle-upgrade-test]
+    needs: [changes, test, lint, verify-cancel-on-close-coupling, pg-upgrade-test, pg-upgrade-stepwise, legacy-extension-update-test, pg-tle-test, pg-tle-upgrade-test]
     if: always()
     runs-on: ubuntu-latest
     steps:
