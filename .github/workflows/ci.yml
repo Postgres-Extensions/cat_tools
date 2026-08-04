@@ -255,8 +255,7 @@ jobs:
   #      (extension-update-test's PG12+ leg) -- folded in here since it runs
   #      on the same majors as (1), and this job's container, checkout, and
   #      cat_tools install are already there; a separate job would pay for
-  #      all of that again for no added coverage. See that step's own
-  #      comment for what was verified locally before folding it in.
+  #      all of that again for no added coverage.
   #
   # The `pg-upgrade-test` job does a BINARY pg_upgrade, SINGLE jump: install
   # an OLD version on an OLD major, binary-upgrade the cluster straight to a
