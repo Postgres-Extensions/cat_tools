@@ -1,5 +1,5 @@
 \set ECHO none
-1..7
+1..8
 ok 1 - Function _cat_tools.function__arg_to_regprocedure(text, text, text) should not be security definer
 ok 2 - Function _cat_tools.function__drop_temp(regprocedure, text) should not be security definer
 ok 3 - Verify regprocedure()
@@ -11,4 +11,5 @@ WARNING:  function__arg_types_text() is deprecated, use routine__parse_arg_types
 ok 6 - Verify deprecated function__arg_types_text() with INOUT and OUT
 WARNING:  function__arg_types_text() is deprecated, use routine__parse_arg_types_text instead
 ok 7 - Verify deprecated function__arg_types_text() with simple args
+ok 8 - cat_tools schema(s) must not be part of the resolved search_path -- got {tap,public}
 # TRANSACTION INTENTIONALLY LEFT OPEN!

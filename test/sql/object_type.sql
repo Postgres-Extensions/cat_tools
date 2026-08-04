@@ -60,6 +60,8 @@ SELECT plan(
   + 3 * 2
 
   + 1 -- objects__shared
+
+  + 1 -- search_path still clean (test/finish.sql)
 );
 
 SELECT is(
@@ -261,7 +263,7 @@ SELECT bag_eq(
   , 'Verify objects__shared_src() returns correct values'
 );
 
-\i test/pgxntool/finish.sql
+\i test/finish.sql
 
 --select name,setting from pg_settings where name ~ '^lc_';
 

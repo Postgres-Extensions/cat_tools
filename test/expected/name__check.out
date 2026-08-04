@@ -1,8 +1,9 @@
 \set ECHO none
-1..5
+1..6
 ok 1 - Verify public has no perms
 ok 2 - Simple name
 ok 3 - Name with spaces
 ok 4 - NULL
 ok 5 - Error on overflow
+ok 6 - cat_tools schema(s) must not be part of the resolved search_path -- got {tap,public}
 # TRANSACTION INTENTIONALLY LEFT OPEN!

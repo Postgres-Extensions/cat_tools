@@ -1,5 +1,5 @@
 \set ECHO none
-1..89
+1..90
 ok 1 - Verify type and prokind enums have same size
 ok 2 - Simple sanity check of routine__type()
 ok 3 - Simple sanity check of routine__type() with enum
@@ -89,4 +89,5 @@ ok 86 - Verify routine__arg_names_text() formatting
 ok 87 - Verify routine__arg_names_text() with unnamed arguments
 ok 88 - Verify routine__arg_names_text() with built-in function
 ok 89 - Verify routine__arg_names_text() with no arguments
+ok 90 - cat_tools schema(s) must not be part of the resolved search_path -- got {tap,public}
 # TRANSACTION INTENTIONALLY LEFT OPEN!

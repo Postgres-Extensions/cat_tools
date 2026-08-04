@@ -1,8 +1,9 @@
 \set ECHO none
-1..5
+1..6
 ok 1 - Verify public has no perms
 ok 2 - Non-existent relation throws error
 ok 3 - Non-existent column throws error
 ok 4 - Verify details of pg_class.relname
 ok 5 - Verify details of pg_tables.tablename
+ok 6 - cat_tools schema(s) must not be part of the resolved search_path -- got {tap,public}
 # TRANSACTION INTENTIONALLY LEFT OPEN!

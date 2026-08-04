@@ -1,5 +1,5 @@
 \set ECHO none
-1..7
+1..8
 ok 1 - cat_tools.pg_extension view row count
 ok 2 - Sanity-check that we get a row for our extension
 ok 3 - pg_extension__get() returns correct data
@@ -7,4 +7,5 @@ ok 4 - pg_extension__get() for non-existent extension throws an error
 ok 5 - Verify extension__schemas_unique(text) returns correct data
 ok 6 - Verify extension__schemas(text) returns correct data
 ok 7 - extension__schemas_unique with bogus extension fails
+ok 8 - cat_tools schema(s) must not be part of the resolved search_path -- got {tap,public}
 # TRANSACTION INTENTIONALLY LEFT OPEN!

@@ -1,6 +1,7 @@
 \set ECHO none
 
-1..2
+1..3
 ok 1 - Verify base data on 
 ok 2 - Verify public has no perms
+ok 3 - cat_tools schema(s) must not be part of the resolved search_path -- got {tap,public}
 # TRANSACTION INTENTIONALLY LEFT OPEN!

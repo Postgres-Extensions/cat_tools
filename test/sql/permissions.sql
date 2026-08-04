@@ -30,6 +30,7 @@ SELECT plan(
     (SELECT count(*)::int FROM cat_types) * 2      -- no_use denied + use allowed
   + (SELECT count(*)::int FROM cat_functions) * 2  -- no_use denied + use allowed
   + 2                                              -- _cat_tools schema access (no_use denied + use allowed)
+  + 1                                              -- search_path still clean (test/finish.sql)
 );
 
 /*
@@ -97,6 +98,6 @@ SELECT is(
     , 'use_role has USAGE on _cat_tools schema'
 );
 
-\i test/pgxntool/finish.sql
+\i test/finish.sql
 
 -- vi: expandtab ts=2 sw=2

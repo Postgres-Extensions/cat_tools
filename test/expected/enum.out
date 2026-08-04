@@ -1,7 +1,8 @@
 \set ECHO none
-1..4
+1..5
 ok 1 - Create test enum
 ok 2 - Permission denied trying to run functions
 ok 3 - Permission denied trying to run functions
 ok 4
+ok 5 - cat_tools schema(s) must not be part of the resolved search_path -- got {tap,public}
 # TRANSACTION INTENTIONALLY LEFT OPEN!

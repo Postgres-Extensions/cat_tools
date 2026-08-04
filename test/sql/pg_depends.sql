@@ -34,6 +34,7 @@ SELECT plan(
   --+ (SELECT count(*)::int FROM func_calls)
 
   + 1 -- _cat_tools.pg_depend_v
+  + 1 -- search_path still clean (test/finish.sql)
 );
 
 /*
@@ -89,6 +90,6 @@ SELECT CASE
 
 SET LOCAL ROLE :"use_role";
 
-\i test/pgxntool/finish.sql
+\i test/finish.sql
 
 -- vi: expandtab ts=2 sw=2
