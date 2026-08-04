@@ -359,28 +359,23 @@ jobs:
           # and this job's container, checkout, and cat_tools install are
           # already there; a separate job would pay for all of that again
           # for no added coverage.
-          # update-scenario creates its own database (cat_tools_update, not
-          # pg_regress's own throwaway db from verify-results above --
-          # confirmed no name collision), plants a dependency guard (proving
-          # a stray non-CASCADE drop is blocked throughout, not just that
-          # the update ran), ALTER EXTENSION UPDATEs 0.2.2 to current,
-          # structurally compares the result against a fresh install
-          # (assert_matches_fresh, via bin/structural_diff), and runs the
-          # full suite against it in existing mode. Reusing the SAME suite
-          # and expected output asserts the updated database behaves
-          # identically to a fresh install. See extension-update-test below
-          # for the PG10-only legacy checks this does NOT cover (those
-          # pre-0.2.2 scripts don't load on PG12+ at all).
           #
-          # Verified locally before folding it in: ran `make
-          # check-relkind-source && make verify-results && bin/test_existing
-          # update-scenario cat_tools_update 0.2.2` in one shell/cluster
-          # session (mirroring this step). Confirmed no database-name
-          # collision, the dependency-guard proof fires (once right after
-          # CREATE EXTENSION, once again after the suite run), the
-          # structural-diff check reports the updated database structurally
-          # identical to a fresh install, and the full suite passes -- exit
-          # 0 end to end.
+          # NOT equivalent to `make test-update` (install 0.2.2 -> ALTER
+          # EXTENSION UPDATE -> run the suite, all inside pg_regress's own
+          # throwaway db). update-scenario creates its own database
+          # (cat_tools_update, not pg_regress's throwaway db from
+          # verify-results above -- confirmed no name collision), ALSO
+          # plants a dependency guard (proving a stray non-CASCADE drop
+          # stays blocked through the update, not just that the update
+          # itself ran) and structurally compares the result against a
+          # fresh install (assert_matches_fresh, via bin/structural_diff) --
+          # see bin/test_existing's own header for why -- before running
+          # the full suite against the real updated database in existing
+          # mode. Reusing the SAME suite and expected output asserts the
+          # updated database behaves identically to a fresh install. See
+          # extension-update-test below for the PG10-only legacy checks
+          # this does NOT cover (those pre-0.2.2 scripts don't load on
+          # PG12+ at all).
           bin/test_existing update-scenario cat_tools_update 0.2.2
 
   # Style linter (https://github.com/Postgres-Extensions/linter, vendored at
