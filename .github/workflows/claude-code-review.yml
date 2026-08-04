@@ -137,7 +137,7 @@ jobs:
         # branch (master), never the fork's PR head. See the SECURITY note
         # above; anthropics/claude-code-action fetches the actual PR head
         # itself afterward via the base repo's `refs/pull/<N>/head` ref.
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 1
           persist-credentials: false
