@@ -47,7 +47,7 @@ jobs:
       legacy_pg: ${{ steps.pg.outputs.legacy_pg }}
     steps:
       - name: Check out the repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           # Full history needed so BASE and HEAD below are both reachable
           # for `git diff`.
@@ -330,7 +330,7 @@ jobs:
       - name: Start PostgreSQL ${{ matrix.pg }}
         run: pg-start ${{ matrix.pg }}
       - name: Check out the repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       - name: Install rsync and server headers
         # postgresql-server-dev-NN provides catalog/pg_class.h, which
         # test/gen-relkinds.sh reads for the relkind drift check in
@@ -393,7 +393,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out the repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       - name: Lint SQL
         # CRITICAL: call `make lint` directly, not some other path (a script, a
         # different target, etc). lint.mk's vendored include is guarded on
@@ -416,7 +416,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out the repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       - name: Confirm ci.yml / claude-code-review.yml still match cancel-on-close.yml's assumptions
         run: |
           python3 - <<'PY'
@@ -558,7 +558,7 @@ jobs:
       - name: Start PostgreSQL ${{ matrix.old_pg }}
         run: pg-start ${{ matrix.old_pg }}
       - name: Check out the repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       - name: Install rsync
         run: apt-get install -y rsync
       - name: Recreate old cluster with data checksums enabled
@@ -639,7 +639,7 @@ jobs:
           pg_ctlcluster 10 test start
           pg_isready -t 30
       - name: Check out the repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       - name: Install rsync
         # Must NOT install a newer server-dev yet: `make install` just below runs
         # with the DEFAULT pg_config, which must still resolve to PG10. Each newer
@@ -725,7 +725,7 @@ jobs:
       - name: Start PostgreSQL ${{ env.LEGACY_PG }}
         run: pg-start ${{ env.LEGACY_PG }}
       - name: Check out the repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       - name: Install rsync
         # No server-dev header package here: this job runs no suite (see the
         # job comment above), so nothing needs the relkind drift check.
@@ -801,7 +801,7 @@ jobs:
       - name: Start PostgreSQL ${{ matrix.pg }}
         run: pg-start ${{ matrix.pg }}
       - name: Check out the repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       - name: Install rsync
         run: apt-get install -y rsync
       - name: Install pgtap (test harness dependency)
@@ -933,7 +933,7 @@ jobs:
       - name: Start PostgreSQL ${{ matrix.old_pg }}
         run: pg-start ${{ matrix.old_pg }}
       - name: Check out the repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       - name: Install rsync
         run: apt-get install -y rsync
       - name: Recreate old cluster with data checksums enabled
@@ -1031,7 +1031,7 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Verify all jobs are listed in needs
         # Ensures this job won't silently ignore a newly-added job that was
         # omitted from the needs list above.
