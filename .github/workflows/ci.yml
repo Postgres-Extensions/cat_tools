@@ -395,6 +395,14 @@ jobs:
       - name: Check out the repo
         uses: actions/checkout@v6
       - name: Lint SQL
+        # CRITICAL: call `make lint` directly, not some other path (a script, a
+        # different target, etc). lint.mk's vendored include is guarded on
+        # `$(wildcard .git)` so a source tarball (no .git) can still build/install
+        # -- if that guard ever went false here (checkout somehow left no .git),
+        # `lint` wouldn't exist as a target at all, and `make lint` fails loudly
+        # ("No rule to make target 'lint'") rather than silently skipping. Any
+        # wrapper that swallows that exit code or calls a different entry point
+        # would defeat this safety net.
         run: make lint
 
   # cancel-on-close.yml cancels in-flight CI/claude-review runs on PR close by
