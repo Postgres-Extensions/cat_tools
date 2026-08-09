@@ -47,7 +47,7 @@ the corresponding `sql/cat_tools--<version>.sql` is gitignored and
 regenerated. **This `.sql.in` preprocessing layer is specific to this
 repo — most pgxntool consumers hand-edit the base `sql/{ext}.sql`
 directly and have no `.sql.in` step at all**, so don't expect to find it
-documented anywhere general.
+documented in `../ai/CLAUDE.md` or pgxntool's own docs.
 
 - If a version's `.sql.in` exists, track the `.sql.in` and not the
   generated `.sql`.
