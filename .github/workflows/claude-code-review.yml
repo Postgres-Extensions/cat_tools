@@ -38,17 +38,24 @@ concurrency:
 
 jobs:
   claude-review:
-    # Trusted fork only, and skip drafts (don't spend API/CI on unfinished PRs).
-    # To add more trusted owners, extend the head-owner check.
+    # Trusted author only, and skip drafts (don't spend API/CI on unfinished PRs).
+    # To add more trusted authors, extend the author check.
     #
-    # SECURITY-CRITICAL: this owner check is what makes it safe to run this
+    # SECURITY-CRITICAL: this author check is what makes it safe to run this
     # pull_request_target job -- which holds base-repo secrets/token -- on
     # every fork PR unattended. Do not remove or loosen this condition (e.g.
-    # drop the owner check, or allow non-owner forks) without re-evaluating
+    # drop the author check, or allow untrusted authors) without re-evaluating
     # whether this job should keep running on arbitrary forks.
+    #
+    # NOTE: this checks the PR AUTHOR (user.login), not head.repo.owner.login.
+    # head.repo.owner.login only identifies "who owns the fork" for fork-headed
+    # PRs -- for an upstream-branch-headed PR (base and head both in this repo,
+    # e.g. from `gh stack`, or `gh pr create` without a fork), it's always this
+    # repo's own org, never the actual author, so that check silently skipped
+    # review on every such PR regardless of who opened it.
     if: >-
       github.event.pull_request.draft == false &&
-      github.event.pull_request.head.repo.owner.login == 'jnasbyupgrade' &&
+      github.event.pull_request.user.login == 'jnasbyupgrade' &&
       (github.event.action != 'labeled' || github.event.label.name == 'claude-debug')
     runs-on: ubuntu-latest
     timeout-minutes: 60
