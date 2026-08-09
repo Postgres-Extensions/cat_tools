@@ -36,32 +36,6 @@ own addition; see "SQL file conventions" below. Anything referencing
 those generated files at Make parse time is subject to two-phase-make
 timing.)
 
-## Pull request descriptions
-
-The maintainer builds the squash commit message from the PR description, so the
-**opening** of the description is used directly as the basis for that commit message.
-Write it accordingly:
-
-- Make the opening stand alone as a good commit message: no leading header/title line
-  (the PR title is the subject), concise, self-contained. Multiple paragraphs are fine.
-- Lead with the substantive change and why. Keep incidental changes (minor doc tweaks,
-  dependency/action version bumps, small cleanups) OUT of the opening — put them lower
-  or omit them; the diff carries those details for anyone who wants them.
-- Do NOT add a marker delimiting the "commit message" from "the rest". Just let the
-  opening carry its own weight, with any extra context following after it.
-- Do NOT hard-wrap paragraphs: write each paragraph as a single long line (blank line
-  between paragraphs). Hard-wrapping at ~80 columns conflicts with how GitHub builds the
-  squash commit message from the description.
-- Length past the opening is fine — backstory and detail are often worth keeping. Being
-  hard to *scan* is the actual problem: if there's enough detail to justify it, give the
-  rest real structure (headers, bullet lists, separate sections for "what changed" vs.
-  "how it was verified"), not one undifferentiated block of prose.
-- Watch for two habits specifically: being more verbose than the point actually needs —
-  structure alone doesn't fix over-length — and "leaking" context from how the work
-  evolved. An earlier idea that got revised or dropped before anything merged describes
-  the process, not the result; it doesn't belong in the description of what actually
-  shipped.
-
 ## SQL file conventions
 
 This repo preprocesses a tracked `sql/cat_tools.sql.in` into pgxntool's
