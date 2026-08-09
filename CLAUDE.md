@@ -1,25 +1,20 @@
 # Claude Code Instructions for cat_tools
 
-## GitHub CI
+See [`../ai/CLAUDE.md`](../ai/CLAUDE.md) (or
+https://github.com/Postgres-Extensions/ai/blob/main/CLAUDE.md if that path
+doesn't exist locally — clone it to `../ai/` per its own first instruction),
+`../ai/PR.md`, and `../ai/CODE_STYLE.md` for cross-repo conventions not
+restated below (CI monitoring, PR titles/git safety, comment style,
+PR/issue reference format, etc.).
 
-After **every** push, monitor GitHub CI in a background subagent until all jobs pass or a failure is confirmed. Use `gh pr checks <pr> --watch` when the branch has an open PR; otherwise (a branch with no PR yet, or a push to `master`) use `gh run watch` for the pushed commit. Investigate and fix failures immediately rather than leaving them for the user to notice.
+## GitHub CI
 
 (`.github/workflows/ci.yml`'s `changes` job computes the actual per-push changed file set and exposes `docs_only`; the heavy `test`, `pg-upgrade-test`, and `legacy-extension-update-test` jobs skip when `needs.changes.outputs.docs_only == 'true'` — i.e. every changed file in that push matches `**.md`/`**.asc`. Unlike the old workflow-level `paths-ignore`, this is evaluated per push/commit, not over the whole PR diff, so a doc-only commit on a PR that also touches code still gets the skip, and the workflow (including the required `all-checks-passed` check) always triggers and reports rather than being skipped outright by GitHub. When unsure, check `gh run list` for the pushed commit and monitor whatever run appears; if none does, there is nothing to watch.)
 
-## Where a test-matrix dimension belongs
-
-The full set of things we test is itself a matrix (PostgreSQL major, UPDATE vs. CREATE
-EXTENSION, etc.). It's a real tradeoff, not a rule with one exception — but bias toward
-putting a new dimension in `make` over `ci.yml`: it can then be run locally, and it never
-spins up an extra container/job. Needing real isolation to mean anything (e.g. pg_tle's
-dedicated cluster) is one good reason to put a dimension in `ci.yml` instead, not the only
-possible one — weigh the actual tradeoff, just start from a bias toward `make`.
-
 ## Build/test system (pgxntool)
 
-This repo's build is driven by pgxntool (embedded under `pgxntool/`). Its docs are
-**not** auto-loaded, so for any non-trivial build or test work, read `pgxntool/README.asc`
-and `pgxntool/CLAUDE.md` first. High-value gotchas that those docs explain:
+High-value gotchas that `pgxntool/README.asc`/`pgxntool/CLAUDE.md` don't
+(yet) explain:
 
 - `DATA`, `MODULES`, `DOCS`, and `installcheck` are PGXS variables/targets, not
   pgxntool's; pgxntool only wraps/seeds them. Don't assume they belong to pgxntool.
@@ -34,105 +29,52 @@ and `pgxntool/CLAUDE.md` first. High-value gotchas that those docs explain:
 - `test/install/*.sql` runs once, committed, before the suite in the same `pg_regress`
   invocation, so its state persists into every test. `test/build/*.sql` are separate
   build sanity checks run before the suite.
-- Versioned `.sql` files are generated from their `.sql.in` sources and gitignored.
-  Anything referencing them at Make parse time is subject to two-phase-make timing.
 
-## Bug Fixes
-
-Comment the fix where it isn't self-evident, but keep it concise — no novels. Do NOT
-recount the bug's history (what a past version got wrong) UNLESS the same mistake could
-realistically be made again; if it could, briefly state the guard fact that prevents it.
-Never repeat the same comment verbatim in adjacent code — write it once and reference it
-("same as above").
-
-## Git
-
-**Never delete a branch without explicit user approval.** This includes `git push origin --delete`, `git branch -d`, and `git branch -D`. Always ask first.
-
-**Always open PRs against the main repo** (`Postgres-Extensions/cat_tools`), not a fork.
-
-**Prefix with `CI: `** any commit/PR subject whose change affects ONLY CI (workflow files,
-CI-only scripts) and does not touch the main test suite/build. A change that also touches the
-test suite/build does not get the prefix, even if CI-related.
-
-## References to PRs and issues in committed files
-
-A reference to a GitHub PR or issue inside a **committed file** (SQL/code comments,
-`.github/workflows/ci.yml` comments, `CLAUDE.md`, `test/install/load.sql`, docs) MUST be a
-full URL, e.g. `https://github.com/Postgres-Extensions/cat_tools/issues/28` — never a bare
-`#28` (a bare number is meaningless when the file is read outside GitHub), **if it's
-something a reader might still need to act on or look up** — an open TODO, a workaround to
-revisit once some other issue lands, a known limitation. For a reference that's purely
-historical context (explaining why past code looks the way it does, where the issue is
-already resolved and there's nothing left to do), a bare `#28` is fine — readers are less
-likely to need to chase it down, and it's less noise. When in doubt, use the full URL.
-Referencing by number is always fine in GitHub-native text (PR/issue titles and
-descriptions, review comments).
-
-## Pull request descriptions
-
-The maintainer builds the squash commit message from the PR description, so the
-**opening** of the description is used directly as the basis for that commit message.
-Write it accordingly:
-
-- Make the opening stand alone as a good commit message: no leading header/title line
-  (the PR title is the subject), concise, self-contained. Multiple paragraphs are fine.
-- Lead with the substantive change and why. Keep incidental changes (minor doc tweaks,
-  dependency/action version bumps, small cleanups) OUT of the opening — put them lower
-  or omit them; the diff carries those details for anyone who wants them.
-- Do NOT add a marker delimiting the "commit message" from "the rest". Just let the
-  opening carry its own weight, with any extra context following after it.
-- Do NOT hard-wrap paragraphs: write each paragraph as a single long line (blank line
-  between paragraphs). Hard-wrapping at ~80 columns conflicts with how GitHub builds the
-  squash commit message from the description.
-- Length past the opening is fine — backstory and detail are often worth keeping. Being
-  hard to *scan* is the actual problem: if there's enough detail to justify it, give the
-  rest real structure (headers, bullet lists, separate sections for "what changed" vs.
-  "how it was verified"), not one undifferentiated block of prose.
-- Watch for two habits specifically: being more verbose than the point actually needs —
-  structure alone doesn't fix over-length — and "leaking" context from how the work
-  evolved. An earlier idea that got revised or dropped before anything merged describes
-  the process, not the result; it doesn't belong in the description of what actually
-  shipped.
+(The `.sql.in`-based generation this repo layers on top of pgxntool's own
+versioned-SQL generation is *not* a pgxntool gotcha — it's this repo's
+own addition; see "SQL file conventions" below. Anything referencing
+those generated files at Make parse time is subject to two-phase-make
+timing.)
 
 ## SQL file conventions
 
-Rules for what to track in git:
+This repo preprocesses a tracked `sql/cat_tools.sql.in` into pgxntool's
+base `sql/cat_tools.sql` (gitignored, regenerated by `make` via `sql.mk`)
+before pgxntool's own versioned-SQL generation runs on top of that base.
+Versioned install scripts follow the same pattern:
+`sql/cat_tools--<version>.sql.in` is the tracked, authored source, and
+the corresponding `sql/cat_tools--<version>.sql` is gitignored and
+regenerated. **This `.sql.in` preprocessing layer is specific to this
+repo — most pgxntool consumers hand-edit the base `sql/{ext}.sql`
+directly and have no `.sql.in` step at all**, so don't expect to find it
+documented in `../ai/CLAUDE.md` or pgxntool's own docs.
 
-0. If a `.sql.in` file exists, track the `.sql.in` and **not** the corresponding `.sql`.
-1. If no `.sql.in` exists, track the `.sql` directly (e.g. historical pre-0.2.0 files).
-2. Version-specific install scripts (e.g. `sql/cat_tools--0.2.2.sql.in`) are tracked BY
-   DEFAULT. They enable update testing (install an old version, `ALTER EXTENSION UPDATE`,
-   verify) and, because a new MAJOR PostgreSQL version can unpredictably break installing
-   an OLDER extension version, keeping old versions committed lets CI catch when a version
-   stops installing on a newer PG.
-   See https://github.com/Postgres-Extensions/pgxntool/issues/51.
-3. Update scripts (e.g. `sql/cat_tools--0.2.1--0.2.2.sql.in`) MUST be tracked — they are
-   essential to the update path and have no substitute.
-4. EXCEPTION to rule 2: a version that changes little AND ships no nontrivial update-path machinery MAY omit its generated install script (little test-coverage value; it is regenerated from `sql/cat_tools.sql.in` at build time). Track it whenever the version carries meaningful changes or a nontrivial update script — a complex update warrants the committed install script for update-test coverage and provenance.
-5. Version-specific files MUST NEVER be edited manually — always edit `sql/cat_tools.sql.in`
-   and regenerate.
-6. EXCEPTION to rule 2 (and to pgxntool's own "don't `.gitignore` a skipped version, `rm`
-   it once" guidance — `pgxntool/README.asc`, "Don't `.gitignore` a Skipped Version"):
-   `sql/cat_tools--stable.sql.in` (the pseudo-version `default_version` sits at between
-   releases, see RELEASE.md) IS gitignored, not tracked. That guidance is about a version
-   that's normally tracked but occasionally skipped — a one-time, transient leftover file.
-   `stable` is the opposite case: it's *permanently* current between releases, so unlike a
-   skipped version it would be regenerated and re-diffed on every single source edit if
-   tracked, for zero test-coverage value (CI already builds+tests a fresh install from
-   source on every push regardless). See `sql/.gitignore`'s comment and RELEASE.md step 4.
+- If a version's `.sql.in` exists, track the `.sql.in` and not the
+  generated `.sql`.
+- Pre-0.2.0 versions have no `.sql.in` source and are tracked as plain
+  `.sql` directly (historical exception; see `sql/.gitignore`).
+- Never hand-edit a generated `.sql` file — edit the `.sql.in` (or, for
+  the base file, `sql/cat_tools.sql.in`) and regenerate.
+
+See [`../ai/CLAUDE.md`](../ai/CLAUDE.md) for the general (pgxntool-level)
+rules this preprocessing sits on top of: why version-specific install and
+update scripts are tracked at all, when it's OK to skip one, and why a
+permanently-current pseudo-version like `stable` is gitignored instead of
+`rm`'d once. cat_tools' own current pseudo-version
+(`sql/cat_tools--stable.sql.in`) is gitignored per that last rule — for
+this repo specifically, its `.sql.in` is itself pure derived output (a
+byte-for-byte copy of `cat_tools.sql.in`, regenerated on every `make`), so
+unlike a real release it's ignored too rather than tracked. See
+`sql/.gitignore`'s comments and RELEASE.md step 4 for the full detail.
 
 ## CI: PostgreSQL version support
 
-**Policy:** Never support a fresh install on any PostgreSQL version where the extension
-update path is known to be broken — a version that cannot be updated to is not truly
-supported.
-
-Both PG10 and PG11 are dropped as of 0.3.0. The `ALTER TYPE ... ADD VALUE` statements in
-the update script cannot run inside an extension update script on PG11 or earlier
-(PROCESS_UTILITY_QUERY context); this restriction was lifted in PG12. Because a version
-that cannot be updated to is not truly supported, PG10 and PG11 support is dropped
-entirely. cat_tools 0.3.0 supports PG12+.
+See [`../ai/CLAUDE.md`](../ai/CLAUDE.md) for the general PostgreSQL-version-
+support policy. Applied here: both PG10 and PG11 are dropped as of 0.3.0.
+The `ALTER TYPE ... ADD VALUE` statements in the update script cannot run
+inside an extension update script on PG11 or earlier (PROCESS_UTILITY_QUERY
+context); this restriction was lifted in PG12. cat_tools 0.3.0 supports
+PG12+.
 
 ### Test-load modes (`TEST_LOAD_SOURCE`)
 
@@ -182,43 +124,3 @@ parse-time error):
 **When working on a new version:** review and expand these matrices. A new version's install
 script may support more PG versions, enabling testing of the update path from older
 cat_tools versions on newer PostgreSQL.
-
-## Code Style
-
-### Comments
-Always use block comment format for multi-line comments in SQL files:
-
-```sql
-/*
- * First line of comment.
- * Second line of comment.
- */
-```
-
-Never use `--` line comments for multi-line explanations.
-
-Be concise — humans have limited context too, not just AI. Say the point in as few words
-as it needs, not as many as the topic could support.
-
-Usually, explain something at the *first* place it's mentioned, not somewhere later that
-assumes context the reader hasn't reached yet — but this isn't absolute. One real
-exception: you're already in the middle of explaining A, and need to mention B (which
-also needs its own explanation) — stopping to fully explain B right there often confuses
-the explanation of A more than deferring B to its own natural spot would. Use judgment.
-When a comment points to another spot in the same file, say `above` or `below` so the
-reader doesn't have to search both directions.
-
-### Closing non-indentable blocks
-When closing a code block that cannot be indented to show its nesting (e.g. SQL
-`\endif`, `DO $$...$$`, shell heredocs, column-0 `fi`/`esac`) AND that block
-contains nested blocks, label the closer with a comment naming which block it
-closes — e.g. shell `esac  # basename dispatch`, or a named dollar-quote
-`DO $DO$ ... $DO$` for a DO block. Where the language rejects a trailing comment
-on the closer (psql `\endif` warns "extra argument ignored"), put the label on
-the immediately following line instead (e.g. `\endif` then
-`-- end \if :cat_tools_mode_existing`).
-
-### Terminology
-"upgrade" refers to a PostgreSQL cluster (`pg_upgrade`); "update" refers to an extension
-(`ALTER EXTENSION ... UPDATE`). cat_tools' version-to-version scripts are "update scripts" —
-never "upgrade scripts."
