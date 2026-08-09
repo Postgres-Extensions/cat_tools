@@ -83,8 +83,9 @@ Write it accordingly:
 - Do NOT add a marker delimiting the "commit message" from "the rest". Just let the
   opening carry its own weight, with any extra context following after it.
 - Do NOT hard-wrap paragraphs: write each paragraph as a single long line (blank line
-  between paragraphs). Hard-wrapping at ~80 columns conflicts with how GitHub builds the
-  squash commit message from the description.
+  between paragraphs). The maintainer copies the opening more or less directly into the
+  squash commit message; hard-wrapped line breaks would carry over into that commit
+  message too.
 - Length past the opening is fine — backstory and detail are often worth keeping. Being
   hard to *scan* is the actual problem: if there's enough detail to justify it, give the
   rest real structure (headers, bullet lists, separate sections for "what changed" vs.
