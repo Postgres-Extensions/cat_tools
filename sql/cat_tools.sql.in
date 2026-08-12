@@ -775,8 +775,10 @@ CREATE TYPE cat_tools.object_type AS ENUM(
   , 'materialized view column'
   , 'composite type column'
   , 'foreign table column'
-  -- pg_constraint
-  -- NOTE: a domain itself is considered to be a type
+  /*
+   * pg_constraint
+   * NOTE: a domain itself is considered to be a type
+   */
   , 'domain constraint', 'table constraint'
   -- pg_proc
   , 'aggregate', 'function'
@@ -1281,8 +1283,10 @@ $$
 
 @generated@
 
--- Borrowed from newsysviews: http://pgfoundry.org/projects/newsysviews/
--- sql-lint:disable-block all: copied verbatim from newsysviews, do not reformat
+/*
+ * Borrowed from newsysviews: http://pgfoundry.org/projects/newsysviews/
+ * sql-lint:disable-block all: copied verbatim from newsysviews, do not reformat
+ */
 CREATE OR REPLACE VIEW cat_tools.pg_all_foreign_keys
 AS
   SELECT n1.nspname                                   AS fk_schema_name,
