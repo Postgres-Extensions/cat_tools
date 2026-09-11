@@ -1,31 +1,111 @@
 /*
- * Put every privilege this extension issues into a known state, so a fresh
- * install and an updated install converge.
+ * Converge privileges between a fresh install and an updated one, down to
+ * pg_dump output. https://github.com/Postgres-Extensions/cat_tools/issues/93
  *
  * The install script's ALTER DEFAULT PRIVILEGES grants USAGE on our types
  * implicitly, and an implicit grant is never snapshotted into pg_init_privs,
- * while the same grant written out in an update script is. That left the two
- * paths with identical ACLs but different pg_init_privs, and so different
- * pg_dump output. Issuing the same explicit statements at the end of both
+ * while the same grant written out in an update script is -- identical ACLs,
+ * different dumps. Issuing the same explicit statements at the end of both
  * scripts removes the asymmetry by construction.
- * https://github.com/Postgres-Extensions/cat_tools/issues/93
- *
- * The REVOKE ahead of each GRANT is what makes this normalization rather than a
- * top-up: an ALTER DEFAULT PRIVILEGES configured outside this extension reaches
- * every object a fresh install creates and nothing an update script touches, so
- * whatever it added would otherwise be a permanent divergence.
- *
- * Scope is the two grantees this extension issues privileges to, PUBLIC and the
- * usage role. Grants an administrator made to other roles are left alone -- an
- * update must not silently revoke them.
- *
- * Column-level privileges (pg_attribute.attacl) are deliberately NOT handled.
- * cat_tools grants nothing at column granularity and ALTER DEFAULT PRIVILEGES
- * has no column granularity either, so the drift this exists to prevent cannot
- * reach them. A table-level REVOKE never subsumes column-level privileges, so
- * granting at column granularity in future means extending this at the same
- * time.
  */
+
+/*
+ * One row per object cat_tools issues privileges on, plus the privileges it
+ * intends that object to have. object_kind is the keyword GRANT and REVOKE name
+ * the object with; grant_privilege is what the usage role gets, or NULL for
+ * nothing. privilege__normalize() below is a loop over this.
+ *
+ * Only the grantees cat_tools itself issues to -- PUBLIC and the usage role --
+ * are described here. Grants an administrator made to other roles are left
+ * alone: an update must not silently revoke them.
+ */
+CREATE OR REPLACE VIEW _cat_tools.privilege_target_v AS
+  WITH ext AS (
+    SELECT oid AS extoid
+        , extnamespace
+      FROM pg_catalog.pg_extension
+      WHERE extname = 'cat_tools'
+  )
+  , member AS (
+    SELECT classid
+        , objid
+      FROM pg_catalog.pg_depend
+      WHERE refclassid = 'pg_catalog.pg_extension'::pg_catalog.regclass
+        AND refobjid = (SELECT extoid FROM ext)
+        AND deptype = 'e'
+  )
+  /*
+   * The extension's own schema is created by CREATE EXTENSION itself, so it is
+   * not a member and has to be unioned in.
+   */
+  SELECT 'SCHEMA'::text AS object_kind
+      , n.oid::pg_catalog.regnamespace::text AS object_identity
+      , true AS revoke_public
+      , true AS revoke_role
+      , 'USAGE'::text AS grant_privilege
+    FROM pg_catalog.pg_namespace n
+    WHERE n.oid IN (
+        SELECT extnamespace FROM ext
+        UNION ALL
+        SELECT objid FROM member WHERE classid = 'pg_catalog.pg_namespace'::pg_catalog.regclass
+      )
+  UNION ALL
+  /*
+   * PUBLIC keeps the USAGE Postgres gives it on every type: schema USAGE is what
+   * actually gates our types, so revoking here would tighten the documented
+   * model rather than normalize it.
+   */
+  SELECT 'TYPE'
+      , t.oid::pg_catalog.regtype::text
+      , false
+      , true
+      , 'USAGE'
+    FROM pg_catalog.pg_type t
+    WHERE t.oid IN (SELECT objid FROM member WHERE classid = 'pg_catalog.pg_type'::pg_catalog.regclass)
+      AND t.typtype <> 'p'
+      -- Array types and relation rowtypes carry no ACL of their own
+      AND NOT EXISTS( SELECT FROM pg_catalog.pg_type e WHERE e.typarray = t.oid )
+      AND (
+        t.typrelid = 0
+        OR 'c' = (SELECT c.relkind FROM pg_catalog.pg_class c WHERE c.oid = t.typrelid)
+      )
+  UNION ALL
+  /*
+   * Relations in the extension's own schema are the public API; anything in
+   * _cat_tools is internal and gets no grant. Sequences (relkind 'S') are
+   * excluded because their privilege set is unlike a table's and cat_tools has
+   * none; adding one means adding a branch here.
+   *
+   * Column-level privileges (pg_attribute.attacl) are likewise out of scope:
+   * cat_tools grants nothing at column granularity and ALTER DEFAULT PRIVILEGES
+   * has no column granularity either, so the drift this exists to prevent cannot
+   * reach them. A table-level REVOKE never subsumes column-level privileges, so
+   * granting at column granularity in future means handling them here too.
+   */
+  SELECT 'TABLE'
+      , c.oid::pg_catalog.regclass::text
+      , true
+      , true
+      , CASE WHEN c.relnamespace = (SELECT extnamespace FROM ext) THEN 'SELECT' END
+    FROM pg_catalog.pg_class c
+    WHERE c.oid IN (SELECT objid FROM member WHERE classid = 'pg_catalog.pg_class'::pg_catalog.regclass)
+      AND c.relkind IN ('r', 'p', 'v', 'm', 'f')
+  UNION ALL
+  /*
+   * Which routines the usage role may execute is a per-routine decision made at
+   * the creation site, where __cat_tools.create_function already issues
+   * REVOKE-then-GRANT, so only the REVOKE from PUBLIC is asserted here.
+   */
+  SELECT 'ROUTINE'
+      , p.oid::pg_catalog.regprocedure::text
+      , true
+      , false
+      , NULL::text
+    FROM pg_catalog.pg_proc p
+    WHERE p.oid IN (SELECT objid FROM member WHERE classid = 'pg_catalog.pg_proc'::pg_catalog.regclass)
+;
+COMMENT ON VIEW _cat_tools.privilege_target_v IS 'Every object cat_tools issues privileges on, and the privileges it intends.';
+
 CREATE OR REPLACE FUNCTION _cat_tools.privilege__normalize(
 ) RETURNS void LANGUAGE plpgsql AS $body$
 DECLARE
@@ -35,10 +115,6 @@ DECLARE
    * how it is chosen.
    */
   c_usage_role CONSTANT pg_catalog.name := 'cat_tools__usage';
-
-  c_extension CONSTANT pg_catalog.oid := (
-    SELECT oid FROM pg_catalog.pg_extension WHERE extname = 'cat_tools'
-  );
 
   /*
    * A non-superuser install may be unable to create the role
@@ -56,82 +132,29 @@ BEGIN
   END IF;
 
   FOR r IN
-    WITH member AS (
-      SELECT classid, objid
-        FROM pg_catalog.pg_depend
-        WHERE refclassid = 'pg_catalog.pg_extension'::pg_catalog.regclass
-          AND refobjid = c_extension
-          AND deptype = 'e'
-    )
-    /*
-     * The extension's own schema is created by CREATE EXTENSION itself, so it
-     * is not a member and has to be unioned in.
-     */
-    SELECT 'SCHEMA'::text AS kind
-        , n.oid::pg_catalog.regnamespace::text AS ident
-        , true AS revoke_public
-        , true AS revoke_role
-        , 'USAGE'::text AS grant_priv
-      FROM pg_catalog.pg_namespace n
-      WHERE n.oid IN (
-          SELECT extnamespace FROM pg_catalog.pg_extension WHERE oid = c_extension
-          UNION ALL
-          SELECT objid FROM member WHERE classid = 'pg_catalog.pg_namespace'::pg_catalog.regclass
-        )
-    UNION ALL
-    /*
-     * PUBLIC keeps the USAGE Postgres gives it on every type: schema USAGE is
-     * what actually gates our types, so revoking here would tighten the
-     * documented model rather than normalize it.
-     */
-    SELECT 'TYPE', t.oid::pg_catalog.regtype::text, false, true, 'USAGE'
-      FROM pg_catalog.pg_type t
-      WHERE t.oid IN (SELECT objid FROM member WHERE classid = 'pg_catalog.pg_type'::pg_catalog.regclass)
-        AND t.typtype <> 'p'
-        -- Array types and relation rowtypes carry no ACL of their own
-        AND NOT EXISTS( SELECT FROM pg_catalog.pg_type e WHERE e.typarray = t.oid )
-        AND (
-          t.typrelid = 0
-          OR 'c' = (SELECT c.relkind FROM pg_catalog.pg_class c WHERE c.oid = t.typrelid)
-        )
-    UNION ALL
-    /*
-     * Relations in the extension's own schema are the public API; anything in
-     * _cat_tools is internal and gets no grant. Sequences (relkind 'S') are
-     * excluded because their privilege set is unlike a table's and cat_tools
-     * has none; adding one means adding a branch here.
-     */
-    SELECT 'TABLE', c.oid::pg_catalog.regclass::text, true, true
-        , CASE WHEN c.relnamespace = (SELECT extnamespace FROM pg_catalog.pg_extension WHERE oid = c_extension)
-            THEN 'SELECT'
-          END
-      FROM pg_catalog.pg_class c
-      WHERE c.oid IN (SELECT objid FROM member WHERE classid = 'pg_catalog.pg_class'::pg_catalog.regclass)
-        AND c.relkind IN ('r', 'p', 'v', 'm', 'f')
-    UNION ALL
-    /*
-     * Which routines the usage role may execute is a per-routine decision made
-     * at the creation site, where __cat_tools.create_function already issues
-     * REVOKE-then-GRANT, so only the REVOKE from PUBLIC is asserted here.
-     */
-    SELECT 'ROUTINE', p.oid::pg_catalog.regprocedure::text, true, false, NULL::text
-      FROM pg_catalog.pg_proc p
-      WHERE p.oid IN (SELECT objid FROM member WHERE classid = 'pg_catalog.pg_proc'::pg_catalog.regclass)
-    -- Deterministic statement order, so both paths build ACL entries alike
-    ORDER BY 1, 2
+    SELECT *
+      FROM _cat_tools.privilege_target_v
+      -- Deterministic statement order, so both paths build ACL entries alike
+      ORDER BY object_kind, object_identity
   LOOP
+    /*
+     * REVOKE first, rather than just topping the GRANT up: an ALTER DEFAULT
+     * PRIVILEGES configured outside this extension reaches every object a fresh
+     * install creates and nothing an update script touches, so whatever it added
+     * would otherwise be a permanent divergence.
+     */
     IF r.revoke_public THEN
-      EXECUTE format('REVOKE ALL ON %s %s FROM PUBLIC', r.kind, r.ident);
+      EXECUTE format('REVOKE ALL ON %s %s FROM PUBLIC', r.object_kind, r.object_identity);
     END IF;
 
     CONTINUE WHEN NOT c_have_role;
 
     IF r.revoke_role THEN
-      EXECUTE format('REVOKE ALL ON %s %s FROM %I', r.kind, r.ident, c_usage_role);
+      EXECUTE format('REVOKE ALL ON %s %s FROM %I', r.object_kind, r.object_identity, c_usage_role);
     END IF;
 
-    IF r.grant_priv IS NOT NULL THEN
-      EXECUTE format('GRANT %s ON %s %s TO %I', r.grant_priv, r.kind, r.ident, c_usage_role);
+    IF r.grant_privilege IS NOT NULL THEN
+      EXECUTE format('GRANT %s ON %s %s TO %I', r.grant_privilege, r.object_kind, r.object_identity, c_usage_role);
     END IF;
   END LOOP;
 END
