@@ -10,7 +10,7 @@
 
 use strict;
 use warnings;
-use Test::More tests => 31;
+use Test::More tests => 28;
 use File::Temp qw(tempdir);
 
 my $PROG = 'bin/update_lint_textfirst';
@@ -76,47 +76,30 @@ SQL
     like $out, qr/CREATE TABLE t \(a int\)/, '... and is named in the finding';
 }
 
-# --- enum labels ------------------------------------------------------------
+# --- enum labels, which are out of scope ------------------------------------
 
 {
+    # The pgTAP suite asserts enum contents against the catalog across fresh,
+    # updated and pg_upgraded databases, so this does not second-guess it.
     my ($rc, $out) = run_trio(
         old    => "CREATE TYPE e AS ENUM ('a', 'b');\n",
         new    => "CREATE TYPE e AS ENUM ('a', 'b', 'c');\n",
-        update => "ALTER TYPE e ADD VALUE 'c';\n",
-    );
-    is $rc, 0, 'an added enum label covered by ALTER TYPE ... ADD VALUE is clean';
-    like $out, qr/enum 1,/, '... and is counted as an enum pairing, not a copy';
-}
-
-{
-    # BEFORE/AFTER is how a label lands anywhere but the end, and says nothing
-    # about whether the label is present.
-    my ($rc) = run_trio(
-        old    => "CREATE TYPE e AS ENUM ('a', 'c');\n",
-        new    => "CREATE TYPE e AS ENUM ('a', 'b', 'c');\n",
-        update => "ALTER TYPE e ADD VALUE 'b' BEFORE 'c';\n",
-    );
-    is $rc, 0, 'an ADD VALUE with a BEFORE clause still counts';
-}
-
-{
-    my ($rc, $out) = run_trio(
-        old    => "CREATE TYPE e AS ENUM ('a', 'b');\n",
-        new    => "CREATE TYPE e AS ENUM ('a', 'b', 'c');\n",
-        update => "ALTER TYPE e ADD VALUE 'b';\n",
-    );
-    is $rc, 1, 'an added enum label with no ALTER TYPE fails';
-    like $out, qr/enum e gained label 'c'/, '... naming the label, not the whole type';
-}
-
-{
-    my ($rc, $out) = run_trio(
-        old    => "CREATE TYPE e AS ENUM ('a', 'b');\n",
-        new    => "CREATE TYPE e AS ENUM ('a');\n",
         update => "SELECT 1;\n",
     );
-    is $rc, 1, 'a removed enum label fails';
-    like $out, qr/cannot be removed by an update script/, '... saying no update can do it';
+    is $rc, 0, 'a changed enum on a pre-existing type is exempt';
+    like $out, qr/enum 1,/, '... and the exemption is reported, not silent';
+}
+
+{
+    # Only CHANGED enums are exempt. A brand-new one copies into the update
+    # script verbatim, so the ordinary rule has to keep applying to it.
+    my ($rc, $out) = run_trio(
+        old    => "SELECT 1;\n",
+        new    => "SELECT 1;\nCREATE TYPE e AS ENUM ('a');\n",
+        update => "SELECT 2;\n",
+    );
+    is $rc, 1, 'a brand-new enum type is still checked for a copy';
+    like $out, qr/CREATE TYPE e AS ENUM/, '... and is named in the finding';
 }
 
 # --- scaffolding ------------------------------------------------------------

@@ -43,22 +43,19 @@
 #
 # That works because update scripts are overwhelmingly copy-paste from the
 # install script. Aim it at the small, subtle diffs -- a changed function body,
-# one added enum label, a changed GRANT. A whole new object is hard to miss in a
-# diff of the install script between two versions, so nothing here chases that
-# case, and the deliberate cost of that choice is that this stays small.
+# a changed GRANT, a tweaked view definition. A whole new object is hard to miss
+# in a diff of the install script between two versions, so nothing here chases
+# that case, and the deliberate cost of that choice is that this stays small.
 #
 # The interesting content is therefore not the matcher. It is the short list of
 # cases where a copy is impossible, below, plus the escape hatch for the rest.
 #
-# ENUM LABELS
+# ENUM LABELS -- out of scope, checked properly elsewhere
 #
-#   The one case worth real code, because it is exactly the small diff this
-#   exists to catch and it can never match by copy: the install script states
-#   the final label list in CREATE TYPE ... AS ENUM, while the update script
-#   must say ALTER TYPE ... ADD VALUE for each label the previous version
-#   lacked. A changed CREATE TYPE whose type also existed in OLD is paired with
-#   its old form and checked label by label. Label ORDER is not checked -- see
-#   the limitations below.
+#   A changed CREATE TYPE ... AS ENUM whose type already existed in OLD is
+#   exempt, and deliberately so: enum contents are verified at runtime by the
+#   pgTAP suite, which asserts them against the catalog. See the limitations
+#   below for why that is the right place and this is not.
 #
 # SCAFFOLDING
 #
@@ -104,7 +101,14 @@
 #   and the file the exception is a property of. The intent is a handful per
 #   release on genuine exceptions, never one per statement.
 #
-# LIMITATIONS -- each is a deliberate choice to stay small, not an oversight
+# LIMITATIONS
+#
+# Each case below is declined, not missing. The rule that decides what belongs
+# here is: ask what the right way to verify THIS case is. Where text comparison
+# is genuinely easy it is used; where it is awkward, that awkwardness is evidence
+# the case belongs to a different mechanism -- a runtime catalog comparison, or
+# an explicit test -- and not to a cleverer parser. Growing this script to reach
+# one of them would cost far more than it bought.
 #
 #   - THIS COMPARES TEXT, SO A DIVERGENCE THAT IS INVISIBLE IN THE SQL BUT REAL
 #     IN THE CATALOG IS INVISIBLE HERE. Demonstrated, not hypothetical: defect
@@ -115,12 +119,18 @@
 #     is never snapshotted -- so the two produced different pg_dump output.
 #     bin/structural_diff called them identical too. That class needs a
 #     pg_init_privs or pg_dump comparison; nothing text-level can reach it.
+#   - ENUM LABEL CHANGES ARE OUT OF SCOPE, because a better mechanism already
+#     covers them. The pgTAP suite runs the SAME expected output against a fresh
+#     install, an updated database and a pg_upgraded one (see CLAUDE.md's
+#     TEST_LOAD_SOURCE), so an install and an update script that disagree about
+#     an enum's labels make one of those runs fail against the real catalog --
+#     stronger than anything this could assert about text. A changed CREATE TYPE
+#     ... AS ENUM is therefore exempt here rather than waived. Only a type OLD
+#     already had is exempt; a brand-new enum copies into the update script
+#     verbatim like any other new object, so the ordinary rule covers it.
 #   - Removals are counted and listed but never failed on. A DROP does not
 #     appear in an install script, so a removed statement can only be matched by
 #     inference, never by copy.
-#   - Enum label ORDER is not checked, only the set. ALTER TYPE ... ADD VALUE
-#     takes an optional BEFORE/AFTER, so verifying the resulting sort order
-#     means modelling insert positions -- more machinery than the case is worth.
 #   - Any semantics-preserving edit that changes text is a false positive:
 #     reindenting a statement, reordering two GRANTs, hand-rewriting a helper
 #     call as the literal CREATE OR REPLACE FUNCTION it expands to, adding an
@@ -296,41 +306,9 @@ sub is_scaffolding {
 # Enum labels (see header)
 # ---------------------------------------------------------------------------
 
-# Returns (type name, [labels]) for a CREATE TYPE ... AS ENUM, else nothing.
-# Comments are already gone by normalization time, so every remaining
-# single-quoted run inside the parens is a label.
-sub enum_labels {
+sub enum_type_name {
     my ($norm) = @_;
-    return unless $norm =~ /\ACREATE\s+TYPE\s+(\S+)\s+AS\s+ENUM\s*\((.*)\)\z/is;
-    my ($name, $body) = ($1, $2);
-    my @labels = $body =~ /'((?:[^']|'')*)'/g;
-    return ($name, \@labels);
-}
-
-# Returns undef when $norm is not an enum whose type also existed in OLD (so
-# the plain copy rule applies), otherwise the list of reasons it is not
-# covered -- empty when it is.
-sub enum_gaps {
-    my ($norm, $old_enum, $blob) = @_;
-
-    my ($name, $new_labels) = enum_labels($norm);
-    return undef unless defined $name;
-    my $old_labels = $old_enum->{ lc $name } or return undef;
-
-    my %new_has = map { $_ => 1 } @$new_labels;
-    my @dropped = grep { !$new_has{$_} } @$old_labels;
-    # No update script can remove an enum label, so say so rather than pretend
-    # some ALTER TYPE would have covered it.
-    return ["enum $name dropped label(s) " . join(', ', map {"'$_'"} @dropped)
-          . '; an enum label cannot be removed by an update script']
-        if @dropped;
-
-    my %old_has = map { $_ => 1 } @$old_labels;
-    return [ map { "enum $name gained label '$_'; update script needs "
-                 . "ALTER TYPE $name ADD VALUE '$_'" }
-             grep { $blob !~ /ALTER\s+TYPE\s+\Q$name\E\s+ADD\s+VALUE\s+
-                             (?:IF\s+NOT\s+EXISTS\s+)? '\Q$_\E'/xi }
-             grep { !$old_has{$_} } @$new_labels ];
+    return $norm =~ /\ACREATE\s+TYPE\s+(\S+)\s+AS\s+ENUM\b/i ? lc $1 : undef;
 }
 
 # ---------------------------------------------------------------------------
@@ -479,8 +457,8 @@ my @waivers = parse_waivers($upd_text, $paths[2]);
 
 my %old_enum;
 for my $st (@old) {
-    my ($name, $labels) = enum_labels($st->{norm});
-    $old_enum{ lc $name } = $labels if defined $name;
+    my $name = enum_type_name($st->{norm});
+    $old_enum{$name} = 1 if defined $name;
 }
 
 my %old_count;
@@ -497,7 +475,7 @@ push @added, $_ for grep { $budget{ $_->{norm} }-- > 0 } @new;
 push @removed, $_ for grep { $budget{ $_->{norm} }-- > 0 } @old;
 
 my (@fail, @waived);
-my ($matched, $scaffolding, $enum_ok) = (0, 0, 0);
+my ($matched, $scaffolding, $enum) = (0, 0, 0);
 
 # $subject is what a waiver regex sees, $detail is what gets printed. For a
 # missing copy the subject is the bare statement, so a waiver can name the
@@ -514,11 +492,8 @@ for my $st (@added) {
     if (index($blob, $st->{norm}) >= 0) { $matched++; next }
     if (is_scaffolding($st->{norm}))    { $scaffolding++; next }
 
-    if (my $gaps = enum_gaps($st->{norm}, \%old_enum, $blob)) {
-        $enum_ok++ unless @$gaps;
-        $finding->($where, $_, $_) for @$gaps;
-        next;
-    }
+    my $enum_name = enum_type_name($st->{norm});
+    if (defined $enum_name && $old_enum{$enum_name}) { $enum++; next }
 
     $finding->($where, $st->{norm},
         "added statement has no copy in $paths[2]\n    " . abbrev($st->{norm}));
@@ -535,8 +510,8 @@ push @fail, "$paths[2]: stale waiver /$_->{src}/ matches nothing -- $_->{why}"
 printf "%s\n  old %s (%d statements)\n  new %s (%d statements)\n  update %s\n",
     $PROG, $paths[0], scalar @old, $paths[1], scalar @new, $paths[2];
 printf "  added %d (matched %d, scaffolding %d, enum %d, unmatched %d)\n",
-    scalar @added, $matched, $scaffolding, $enum_ok,
-    scalar @added - $matched - $scaffolding - $enum_ok;
+    scalar @added, $matched, $scaffolding, $enum,
+    scalar @added - $matched - $scaffolding - $enum;
 printf "  removed %d (not checked -- see header)\n", scalar @removed;
 print "  waived $_\n" for @waived;
 
