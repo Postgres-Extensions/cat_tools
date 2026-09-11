@@ -76,7 +76,14 @@
 #   update script; only objects created after the ADP runs inherit it. That is a
 #   real bug in this tree's history and the acceptance test for this rule:
 #   --versions 0.2.1 0.2.2 flags the five enum types created in 0.2.0/0.2.1 that
-#   never got GRANT USAGE. Only the TYPES category is implemented.
+#   never got GRANT USAGE.
+#
+#   Narrow on purpose: only `IN SCHEMA <s> GRANT <p> ON TYPES TO <r>` is
+#   recognized. A FOR ROLE or a schema-less global ADP raises nothing, and
+#   TABLES/FUNCTIONS/SEQUENCES would each need their own "what creates one of
+#   these" pattern. This rule reproduces a known bug shape; it is not a general
+#   ADP analysis, and widening it into one is the kind of growth the limitations
+#   section argues against.
 #
 # ESCAPE HATCH
 #
@@ -131,6 +138,10 @@
 #   - Removals are counted and listed but never failed on. A DROP does not
 #     appear in an install script, so a removed statement can only be matched by
 #     inference, never by copy.
+#   - Waivers are read line by line, not through the scanner, so the marker is
+#     live even inside a string or a dollar-quoted body. Writing `-- update-lint`
+#     anywhere is taken to mean it; waivers are file-scoped, so a directive found
+#     in an odd place still behaves as written.
 #   - Any semantics-preserving edit that changes text is a false positive:
 #     reindenting a statement, reordering two GRANTs, hand-rewriting a helper
 #     call as the literal CREATE OR REPLACE FUNCTION it expands to, adding an
@@ -325,9 +336,13 @@ sub parse_waivers {
         my $rest = $1;
         # Opening with the marker is enough to mean it: anything past that which
         # does not parse is an error, never a no-op (see header).
+        #
+        # Whitespace, not the first `/`, is what closes the regex -- otherwise a
+        # regex containing a `/` (an operator, a character class, a path) would
+        # truncate at it and silently waive something narrower than written.
         usage_error("$path:$lineno: malformed waiver, expected "
                   . "`-- update-lint: ok /REGEX/ reason`:\n    $line")
-            unless $rest =~ m{\A:\s*ok\s+/(.+?)/\s*(\S.*?)\s*\z};
+            unless $rest =~ m{\A:\s*ok\s+/(.+?)/\s+(\S.*?)\s*\z};
         my ($re, $why) = ($1, $2);
         my $qr = eval { qr/$re/i };
         usage_error("$path:$lineno: bad regex in waiver: /$re/") unless $qr;

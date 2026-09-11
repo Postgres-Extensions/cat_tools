@@ -1,16 +1,17 @@
 #!/usr/bin/env perl
 #
-# One case per rule bin/update_lint_textfirst implements, plus the two things
-# only the real tree can prove: that the current development pair is clean, and
-# that the ALTER DEFAULT PRIVILEGES rule reproduces the historical bug it was
-# written for. Kept deliberately small -- a checker whose test suite dwarfs it
-# has stopped being the cheap option. Run from the repo root:
+# One case per rule bin/update_lint_textfirst implements, plus the three things
+# only the real tree can prove: that the current development pair is clean, that
+# the ALTER DEFAULT PRIVILEGES rule reproduces the historical bug it was written
+# for, and that preprocessing erases sql.mk's " VERSIONED FILE!" tag. Kept
+# deliberately small -- a checker whose test suite dwarfs it has stopped being
+# the cheap option. Run from the repo root:
 #
 #     prove bin/test/textfirst.t
 
 use strict;
 use warnings;
-use Test::More tests => 28;
+use Test::More tests => 30;
 use File::Temp qw(tempdir);
 
 my $PROG = 'bin/update_lint_textfirst';
@@ -147,6 +148,18 @@ SQL
     );
     is $rc, 1, 'a waiver that matches nothing fails';
     like $out, qr{stale waiver /nothing matches this/}, '... and says which one';
+}
+
+{
+    # Whitespace closes the regex, not the first `/`. Closing at the first one
+    # would waive /a/ here -- far wider than written, and silently.
+    my ($rc, $out) = run_trio(
+        old    => "SELECT 1;\n",
+        new    => "SELECT 1;\nSELECT a/b;\n",
+        update => "-- update-lint: ok /a/b/ division is fine\n",
+    );
+    is $rc, 0, 'a waiver regex may contain a slash';
+    like $out, qr/waived .*division is fine/, '... and keeps the whole reason';
 }
 
 # A typo must not degrade into "no waiver at all". Both of these would otherwise
