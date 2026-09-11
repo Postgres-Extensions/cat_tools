@@ -345,9 +345,8 @@ sub parse_waivers {
         $lineno++;
         next unless $line =~ m{--\s*update-lint\b(.*)\z};
         my $rest = $1;
-        # Anything that opens with the marker but does not parse is an error,
-        # never a no-op. Silently dropping it hands the author a finding they
-        # believe they already waived, with nothing pointing at the typo.
+        # Opening with the marker is enough to mean it: anything past that which
+        # does not parse is an error, never a no-op (see header).
         usage_error("$path:$lineno: malformed waiver, expected "
                   . "`-- update-lint: ok /REGEX/ reason`:\n    $line")
             unless $rest =~ m{\A:\s*ok\s+/(.+?)/\s*(\S.*?)\s*\z};
