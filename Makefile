@@ -105,3 +105,16 @@ clean_old_version:
 # `.vendor/linter/sql/bin/sql-lint sql/cat_tools--0.3.0.sql.in`.
 LINT_TARGETS = sql/cat_tools.sql.in test/
 include lint.mk
+
+# Static check that this cycle's update script accounts for every change to the
+# install script -- no database, no SQL parser. See bin/update_lint_textfirst's
+# header for what it does and does not catch.
+#
+# Deliberately NOT tied to `lint` in either direction. lint.mk's include is
+# guarded on $(wildcard .git), so `lint` does not exist as a target in a
+# released tarball and `make lint` fails loudly there; naming it as a
+# prerequisite would define it with no recipe and turn that loud failure into a
+# silent pass.
+.PHONY: update-lint
+update-lint:
+	bin/update_lint_textfirst

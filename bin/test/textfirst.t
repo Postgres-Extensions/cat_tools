@@ -1,13 +1,16 @@
 #!/usr/bin/env perl
 #
-# Prototype-sized test set for bin/update_lint_textfirst: one case per idea the
-# sketch is trying to demonstrate, not coverage. Run from the repo root:
+# One case per rule bin/update_lint_textfirst implements, plus the two things
+# only the real tree can prove: that the current development pair is clean, and
+# that the ALTER DEFAULT PRIVILEGES rule reproduces the historical bug it was
+# written for. Kept deliberately small -- a checker whose test suite dwarfs it
+# has stopped being the cheap option. Run from the repo root:
 #
 #     prove bin/test/textfirst.t
 
 use strict;
 use warnings;
-use Test::More tests => 12;
+use Test::More tests => 27;
 use File::Temp qw(tempdir);
 
 my $PROG = 'bin/update_lint_textfirst';
@@ -60,7 +63,7 @@ SQL
         update => "DO \$\$ BEGIN EXECUTE 'CREATE TABLE t (a int)'; END \$\$;\n",
     );
     is $rc, 0, 'a copy buried in a DO block satisfies the added statement';
-    like $out, qr/added 1 \(matched 1, unmatched 0\)/, '... and is counted as matched';
+    like $out, qr/added 1 \(matched 1,/, '... and is counted as matched';
 }
 
 {
@@ -71,6 +74,73 @@ SQL
     );
     is $rc, 1, 'an added statement with no copy fails';
     like $out, qr/CREATE TABLE t \(a int\)/, '... and is named in the finding';
+}
+
+# --- enum labels ------------------------------------------------------------
+
+{
+    my ($rc, $out) = run_trio(
+        old    => "CREATE TYPE e AS ENUM ('a', 'b');\n",
+        new    => "CREATE TYPE e AS ENUM ('a', 'b', 'c');\n",
+        update => "ALTER TYPE e ADD VALUE 'c';\n",
+    );
+    is $rc, 0, 'an added enum label covered by ALTER TYPE ... ADD VALUE is clean';
+    like $out, qr/enum 1,/, '... and is counted as an enum pairing, not a copy';
+}
+
+{
+    # BEFORE/AFTER is how a label lands anywhere but the end, and says nothing
+    # about whether the label is present.
+    my ($rc) = run_trio(
+        old    => "CREATE TYPE e AS ENUM ('a', 'c');\n",
+        new    => "CREATE TYPE e AS ENUM ('a', 'b', 'c');\n",
+        update => "ALTER TYPE e ADD VALUE 'b' BEFORE 'c';\n",
+    );
+    is $rc, 0, 'an ADD VALUE with a BEFORE clause still counts';
+}
+
+{
+    my ($rc, $out) = run_trio(
+        old    => "CREATE TYPE e AS ENUM ('a', 'b');\n",
+        new    => "CREATE TYPE e AS ENUM ('a', 'b', 'c');\n",
+        update => "ALTER TYPE e ADD VALUE 'b';\n",
+    );
+    is $rc, 1, 'an added enum label with no ALTER TYPE fails';
+    like $out, qr/enum e gained label 'c'/, '... naming the label, not the whole type';
+}
+
+{
+    my ($rc, $out) = run_trio(
+        old    => "CREATE TYPE e AS ENUM ('a', 'b');\n",
+        new    => "CREATE TYPE e AS ENUM ('a');\n",
+        update => "SELECT 1;\n",
+    );
+    is $rc, 1, 'a removed enum label fails';
+    like $out, qr/cannot be removed by an update script/, '... saying no update can do it';
+}
+
+# --- scaffolding ------------------------------------------------------------
+
+{
+    # __cat_tools is created and dropped inside the install script, so its
+    # contents cannot differ between a fresh and an updated database.
+    my ($rc, $out) = run_trio(
+        old    => "CREATE FUNCTION __cat_tools.helper() RETURNS void LANGUAGE sql AS 'SELECT';\n",
+        new    => "CREATE FUNCTION __cat_tools.helper(a int) RETURNS void LANGUAGE sql AS 'SELECT';\n",
+        update => "SELECT 1;\n",
+    );
+    is $rc, 0, 'a changed scaffolding definition is exempt';
+    like $out, qr/scaffolding 1,/, '... and the exemption is reported, not silent';
+}
+
+{
+    my ($rc, $out) = run_trio(
+        old    => "SELECT 1;\n",
+        new    => "SELECT 1;\nSELECT __cat_tools.create_function('cat_tools.f');\n",
+        update => "SELECT 2;\n",
+    );
+    is $rc, 1, 'a CALL to scaffolding is still checked -- it creates a real object';
+    like $out, qr/create_function\('cat_tools\.f'\)/, '... and is named in the finding';
 }
 
 # --- the escape hatch -------------------------------------------------------
@@ -92,16 +162,30 @@ SQL
         new    => "SELECT 1;\n",
         update => "-- update-lint: ok /nothing matches this/ stale\n",
     );
-    is $rc, 0, 'an unused waiver does not fail';
-    like $out, qr{UNUSED WAIVER /nothing matches this/}, '... but is reported so it cannot rot';
+    is $rc, 1, 'a waiver that matches nothing fails';
+    like $out, qr{stale waiver /nothing matches this/}, '... and says which one';
 }
 
-# --- ALTER DEFAULT PRIVILEGES, on the real historical bug -------------------
+# --- against the real tree --------------------------------------------------
 
 SKIP: {
-    skip 'run from the repo root', 2 unless -e 'sql/cat_tools--0.2.1.sql.in';
+    skip 'run from the repo root', 6 unless -e 'sql/cat_tools--0.2.1.sql.in';
 
-    my $out = qx{$^X $PROG --versions 0.2.1 0.2.2 2>&1};
+    # No arguments at all: the pair every SQL-touching PR is judged on. It has
+    # to be clean, or the CI step this drives is useless from the day it lands.
+    my $out = qx{$^X $PROG 2>&1};
+    is $? >> 8, 0, 'the current development pair is clean';
+    like $out, qr{new sql/cat_tools\.sql\.in\b}, '... comparing against the base install script';
+    like $out, qr{update sql/cat_tools--\S+--stable\.sql\.in}, '... via the accumulator update script';
+
+    # A released install script is a copy of the base file with sql.mk's
+    # " VERSIONED FILE!" tag added to every @generated@ marker. One of those
+    # markers sits inside a dollar-quoted function body where no comment strip
+    # can reach it, so the pair above is only clean if preprocessing erases the
+    # difference.
+    unlike $out, qr/create_function/, '... with no @generated@ tag false positive';
+
+    $out = qx{$^X $PROG --versions 0.2.1 0.2.2 2>&1};
     my @gaps = $out =~ /^\S+: TYPE (\S+) predates/mg;
     is_deeply [sort @gaps], [sort qw(
         cat_tools.constraint_type cat_tools.procedure_type cat_tools.relation_type

@@ -404,6 +404,17 @@ jobs:
         # wrapper that swallows that exit code or calls a different entry point
         # would defeat this safety net.
         run: make lint
+      - name: Test bin/update_lint_textfirst
+        # Run before the check below, so a bug in the checker is reported as a
+        # bug in the checker rather than as a finding against the SQL.
+        # Test::Harness is core Perl, so `prove` needs no setup.
+        run: prove bin/test/textfirst.t
+      - name: Check the update script covers this cycle's install-script changes
+        # Static and database-free (see bin/update_lint_textfirst's header),
+        # which is why it rides this job rather than the pgxn-tools container.
+        # A step, not a job: all-checks-passed hard-fails when the workflow's
+        # job-key set differs from its `needs:`.
+        run: make update-lint
 
   # cancel-on-close.yml cancels in-flight CI/claude-review runs on PR close by
   # joining the SAME concurrency group strings this workflow and

@@ -1,110 +1,163 @@
 #!/usr/bin/env perl
 #
-# update_lint_textfirst - INCOMPLETE PROTOTYPE. Do not merge, do not wire into
-# CI. It exists only to show, concretely, what a text-first update-script
-# checker looks like next to the object-model one in
-# https://github.com/Postgres-Extensions/cat_tools/pull/90. Several real cases
-# are stubbed, and it has known false positives (both listed below).
+# update_lint_textfirst - catch an install-script change whose update script
+# forgot to keep up, statically: no database, no SQL parser, seconds not
+# minutes.
 #
-# The problem is the same one bin/update_lint states: a PR that changes an
-# extension's SQL must also extend sql/<ext>--<old>--<new>.sql.in so an
-# existing install reaches the same objects, and nothing fails when that is
-# forgotten until a runtime check that needs a database and minutes of CI.
+# A PR that changes an extension's SQL must also extend
+# sql/<ext>--<old>--<new>.sql.in, or an existing install reaches a different
+# set of objects than a fresh one. Nothing fails when that is forgotten until a
+# runtime check that needs a database and minutes of CI.
 #
-# The principle here is different, and it is the whole point of the sketch:
-# never build a model of what an object IS. Compare STATEMENT TEXT.
+# USAGE
+#
+#   bin/update_lint_textfirst                        # the current cycle
+#   bin/update_lint_textfirst --versions OLD NEW     # any other pair
+#   bin/update_lint_textfirst OLD NEW UPDATE         # explicit paths
+#   Options: --sql-dir DIR (default "sql"), --ext NAME (default "cat_tools").
+#   Exit: 0 clean, 1 findings, 2 usage error.
+#
+# With no arguments it checks the only pair that is still editable: the current
+# development cycle. OLD is the last released install script, NEW is the base
+# sql/<ext>.sql.in, and the update script is the accumulator every SQL-touching
+# PR extends. Both version numbers are derived -- the current one from
+# <ext>.control's default_version, the previous one from the single accumulator
+# file named after it -- so a release needs no edit here. Released pairs are
+# frozen and are not in scope by default; running them by hand is a way to
+# validate this script, not a gate.
+#
+# HOW IT WORKS
+#
+# Never build a model of what an object IS. Compare STATEMENT TEXT.
 #
 #   1. Split both install scripts into top-level statements (quote-, comment-
 #      and dollar-quote-aware, so a `;` inside any of those is not a boundary).
 #   2. Normalize each statement: drop comments, collapse whitespace.
 #   3. Multiset-diff the two normalized statement lists. In NEW but not OLD is
 #      "added"; in OLD but not NEW is "removed".
-#   4. Every added/removed statement must appear, normalized, SOMEWHERE in the
+#   4. Every added statement must appear, normalized, SOMEWHERE in the
 #      normalized update script -- substring match against the whole file, not
 #      statement against statement, so a copy wrapped in a DO block, a format()
 #      or an IF still matches.
-#   5. Anything unmatched is reported; exit non-zero.
+#   5. Anything left over is a finding; exit non-zero.
 #
 # That works because update scripts are overwhelmingly copy-paste from the
-# install script: measured on this tree's own history, 85% of added statements
-# match verbatim. The interesting content of the tool is therefore not the
-# matcher, it is the list of cases where a copy is impossible -- and the escape
-# hatch for the rest.
+# install script. Aim it at the small, subtle diffs -- a changed function body,
+# one added enum label, a changed GRANT. A whole new object is hard to miss in a
+# diff of the install script between two versions, so nothing here chases that
+# case, and the deliberate cost of that choice is that this stays small.
 #
-# USAGE:
-#   bin/update_lint_textfirst --versions OLD NEW
-#   bin/update_lint_textfirst OLD_INSTALL NEW_INSTALL UPDATE_SCRIPT
-#   Options: --sql-dir DIR (default "sql"), --ext NAME (default "cat_tools").
-#   Exit: 0 clean, 1 gaps found, 2 usage error.
+# The interesting content is therefore not the matcher. It is the short list of
+# cases where a copy is impossible, below, plus the escape hatch for the rest.
 #
-# ESCAPE HATCH (implemented; it is central to the design)
+# ENUM LABELS
+#
+#   The one case worth real code, because it is exactly the small diff this
+#   exists to catch and it can never match by copy: the install script states
+#   the final label list in CREATE TYPE ... AS ENUM, while the update script
+#   must say ALTER TYPE ... ADD VALUE for each label the previous version
+#   lacked. A changed CREATE TYPE whose type also existed in OLD is paired with
+#   its old form and checked label by label. Label ORDER is not checked -- see
+#   the limitations below.
+#
+# SCAFFOLDING
+#
+#   Statements that create or drop an object in the __<ext> schema are exempt.
+#   That schema is created at the top of the install script and dropped at the
+#   bottom, so nothing in it survives CREATE EXTENSION and no divergence there
+#   can leave an updated database short an object; the update script's own copy
+#   of a helper is free to be bound to whatever names existed when it was
+#   written. Only definitions are exempt, never calls: a
+#   `SELECT __cat_tools.create_function('cat_tools.foo', ...)` creates a real
+#   object and is still checked.
+#
+# ALTER DEFAULT PRIVILEGES
+#
+#   ADP is not retroactive, so a copy of it in the update script is not enough.
+#   When NEW's install adds an ADP that OLD's install did not have, every object
+#   of that category that ALREADY EXISTED in OLD needs an explicit GRANT in the
+#   update script; only objects created after the ADP runs inherit it. That is a
+#   real bug in this tree's history and the acceptance test for this rule:
+#   --versions 0.2.1 0.2.2 flags the five enum types created in 0.2.0/0.2.1 that
+#   never got GRANT USAGE. Only the TYPES category is implemented.
+#
+# ESCAPE HATCH
 #
 #   A waiver comment in the UPDATE script:
 #
 #       -- update-lint: ok /REGEX/ reason
 #
-#   Any finding whose text matches REGEX is suppressed, and the reason is
-#   printed instead. Reason is mandatory. Waivers that match nothing are
-#   reported, so they cannot rot silently. The design intent is that a release
-#   carries a handful of these on genuine exceptions -- not one per statement.
-#   They live in the update script because that is the file being reviewed and
-#   the file the exception is a property of.
+#   Any finding whose text matches REGEX is suppressed and the reason printed
+#   instead -- that text is the statement itself for a missing copy, and the
+#   message for every other rule, so /CREATE TYPE cat_tools.object_type/ reaches
+#   either. The reason is mandatory. A waiver that matches nothing FAILS rather
+#   than being quietly ignored, because a waiver that outlives its reason is how
+#   a check like this rots -- and because the statement it was written for may
+#   have changed underneath it into something that now needs review.
 #
-# IMPLEMENTED GAP: ALTER DEFAULT PRIVILEGES
+#   Waivers live in the update script because that is the file being reviewed
+#   and the file the exception is a property of. The intent is a handful per
+#   release on genuine exceptions, never one per statement.
 #
-#   ADP is not retroactive, so a copy of it in the update script is not enough.
-#   When NEW's install adds an ADP that OLD's install did not have, every
-#   object of that category that ALREADY EXISTED in OLD needs an explicit GRANT
-#   in the update script; only objects created after the ADP runs inherit it.
-#   This is a real bug in this tree's history, which is the acceptance test:
-#   --versions 0.2.1 0.2.2 flags five enum types created in 0.2.0/0.2.1 that
-#   never got GRANT USAGE. Only the TYPES category is implemented.
+# LIMITATIONS -- each is a deliberate choice to stay small, not an oversight
 #
-# STUBBED -- these are the other cases where the update script legitimately
-# cannot hold a copy of the install statement, and this prototype does not
-# handle any of them (each is a false positive today, waivable by hand):
-#
-#   - Enum values. Install says CREATE TYPE ... AS ENUM ('a','b','c'); the
-#     update must say ALTER TYPE ... ADD VALUE 'c'. Needs a label-set diff.
-#   - New columns. Install states the final CREATE TABLE column list; the
-#     update needs ALTER TABLE ... ADD COLUMN.
-#   - Changed view column list. Install uses CREATE OR REPLACE VIEW; the update
-#     must DROP VIEW + CREATE VIEW, because REPLACE cannot drop a column.
-#   - Removals. A DROP never appears in an install script, so a removed
-#     statement can only ever be matched by inference, never by copy. Removed
-#     statements are counted and listed but NOT failed on.
-#
-# KNOWN FALSE POSITIVE SOURCES
-#
-#   - Scaffolding bound to old names. The update script's private copy of
-#     __cat_tools.create_function() calls a differently-named helper than the
-#     install's copy, so the text legitimately differs. This fires on the
-#     current dev pair today.
-#   - Any hand-reformatting. Two helper calls rewritten as literal CREATE OR
-#     REPLACE FUNCTION make 0.2.2->0.2.3 report 2 of 2 added unmatched, even
-#     though the update is correct. Text-first cannot tell that from a real
-#     omission; the escape hatch is the only answer.
-#   - Function overloads, argument reordering, and any semantics-preserving
-#     edit are all invisible to text matching in the same way.
+#   - THIS COMPARES TEXT, SO A DIVERGENCE THAT IS INVISIBLE IN THE SQL BUT REAL
+#     IN THE CATALOG IS INVISIBLE HERE. Demonstrated, not hypothetical: defect
+#     D1 in https://github.com/Postgres-Extensions/cat_tools/issues/93 had a
+#     fresh and an updated install agreeing on every ACL and every
+#     has_type_privilege answer while differing in five pg_init_privs rows,
+#     because ALTER DEFAULT PRIVILEGES grants implicitly and an implicit grant
+#     is never snapshotted -- so the two produced different pg_dump output.
+#     bin/structural_diff called them identical too. That class needs a
+#     pg_init_privs or pg_dump comparison; nothing text-level can reach it.
+#   - Removals are counted and listed but never failed on. A DROP does not
+#     appear in an install script, so a removed statement can only be matched by
+#     inference, never by copy.
+#   - Enum label ORDER is not checked, only the set. ALTER TYPE ... ADD VALUE
+#     takes an optional BEFORE/AFTER, so verifying the resulting sort order
+#     means modelling insert positions -- more machinery than the case is worth.
+#   - Any semantics-preserving edit that changes text is a false positive:
+#     reindenting a statement, reordering two GRANTs, hand-rewriting a helper
+#     call as the literal CREATE OR REPLACE FUNCTION it expands to, adding an
+#     overload. The escape hatch is the answer; there is no cheaper one.
+#   - Substring-against-the-whole-file is loose in the other direction. A
+#     statement copied into a comment, into a format() template that is never
+#     executed, or into an `IF false` branch counts as matched.
+#   - A statement that is present in both installs but whose runtime effect
+#     changed because something it calls changed is not seen at all.
 
 use strict;
 use warnings;
 
 my $PROG = 'bin/update_lint_textfirst';
 
+# Set from @ARGV below, but declared here so the subs close over them.
+my ($sql_dir, $ext) = ('sql', 'cat_tools');
+
+sub usage_error { print STDERR "$PROG: $_[0]\n"; exit 2 }
+
+sub abbrev { my $s = shift; length($s) > 140 ? substr($s, 0, 137) . '...' : $s }
+
 # ---------------------------------------------------------------------------
 # Input
 # ---------------------------------------------------------------------------
 
-# sql.mk rewrites the bare @generated@ marker into a -- comment on its way to
-# the generated .sql, and resolves the version-conditional `-- SED:` markers.
-# Doing the identical substitutions here is what makes them inert without
-# special-casing them in the scanner. As in bin/update_lint, PRIOR TO branches
-# are commented out: every marker in this tree names a PostgreSQL below the
-# support floor, so the REQUIRES branch is the one that installs everywhere.
+# sql.mk resolves the @generated@ and `-- SED:` markers on the way to the
+# generated .sql; doing the identical substitutions here is what makes them
+# inert without special-casing them in the scanner. As in the released files,
+# PRIOR TO branches are commented out: every marker in this tree names a
+# PostgreSQL below the support floor, so the REQUIRES branch is the one that
+# installs everywhere.
+#
+# The " VERSIONED FILE!" tag sql.mk appends when it copies the base file to a
+# versioned one must collapse to the same text, because one @generated@ sits
+# inside __cat_tools.create_function()'s dollar-quoted body, where a comment is
+# body text the splitter cannot strip. Left distinct, that one marker makes
+# every release's copy of that function differ from the base file's for a
+# reason that has nothing to do with the extension's contents.
 sub preprocess {
     my ($text) = @_;
-    $text =~ s/\@generated\@/-- GENERATED FILE! DO NOT EDIT!/g;
+    $text =~ s/\@generated\@(?:\s+VERSIONED\s+FILE!)?/-- GENERATED FILE! DO NOT EDIT!/g;
     $text =~ s/^(.*)-- SED: PRIOR TO ([^!\n]*)!/-- Not used prior to $2: $1/gm;
     return $text;
 }
@@ -221,7 +274,62 @@ sub normalized_blob {
 }
 
 # ---------------------------------------------------------------------------
-# Waivers
+# Scaffolding (see header)
+# ---------------------------------------------------------------------------
+
+sub is_scaffolding {
+    my ($norm) = @_;
+    return $norm =~ m{\A
+        (?: CREATE | DROP ) \s+ (?: OR \s+ REPLACE \s+ )?
+        (?: SCHEMA | FUNCTION | PROCEDURE | TYPE | DOMAIN | TABLE | VIEW ) \s+
+        (?: IF \s+ (?: NOT \s+ )? EXISTS \s+ )?
+        __\Q$ext\E \b
+    }xi;
+}
+
+# ---------------------------------------------------------------------------
+# Enum labels (see header)
+# ---------------------------------------------------------------------------
+
+# Returns (type name, [labels]) for a CREATE TYPE ... AS ENUM, else nothing.
+# Comments are already gone by normalization time, so every remaining
+# single-quoted run inside the parens is a label.
+sub enum_labels {
+    my ($norm) = @_;
+    return unless $norm =~ /\ACREATE\s+TYPE\s+(\S+)\s+AS\s+ENUM\s*\((.*)\)\z/is;
+    my ($name, $body) = ($1, $2);
+    my @labels = $body =~ /'((?:[^']|'')*)'/g;
+    return ($name, \@labels);
+}
+
+# Returns undef when $norm is not an enum whose type also existed in OLD (so
+# the plain copy rule applies), otherwise the list of reasons it is not
+# covered -- empty when it is.
+sub enum_gaps {
+    my ($norm, $old_enum, $blob) = @_;
+
+    my ($name, $new_labels) = enum_labels($norm);
+    return undef unless defined $name;
+    my $old_labels = $old_enum->{ lc $name } or return undef;
+
+    my %new_has = map { $_ => 1 } @$new_labels;
+    my @dropped = grep { !$new_has{$_} } @$old_labels;
+    # No update script can remove an enum label, so say so rather than pretend
+    # some ALTER TYPE would have covered it.
+    return ["enum $name dropped label(s) " . join(', ', map {"'$_'"} @dropped)
+          . '; an enum label cannot be removed by an update script']
+        if @dropped;
+
+    my %old_has = map { $_ => 1 } @$old_labels;
+    return [ map { "enum $name gained label '$_'; update script needs "
+                 . "ALTER TYPE $name ADD VALUE '$_'" }
+             grep { $blob !~ /ALTER\s+TYPE\s+\Q$name\E\s+ADD\s+VALUE\s+
+                             (?:IF\s+NOT\s+EXISTS\s+)? '\Q$_\E'/xi }
+             grep { !$old_has{$_} } @$new_labels ];
+}
+
+# ---------------------------------------------------------------------------
+# Waivers (see header)
 # ---------------------------------------------------------------------------
 
 sub parse_waivers {
@@ -248,12 +356,10 @@ sub waive {
 }
 
 # ---------------------------------------------------------------------------
-# ALTER DEFAULT PRIVILEGES
+# ALTER DEFAULT PRIVILEGES (see header)
 #
-# The one gap this prototype implements. See the header for why a copy of the
-# ADP statement in the update script does not cover objects that predate it.
-# Only the TYPES category is handled; TABLES/FUNCTIONS/SEQUENCES/SCHEMAS would
-# each need their own "what creates one of these" pattern and are not written.
+# Only the TYPES category is written. TABLES/FUNCTIONS/SEQUENCES/SCHEMAS would
+# each need their own "what creates one of these" pattern.
 # ---------------------------------------------------------------------------
 
 sub adp_gaps {
@@ -284,12 +390,51 @@ sub adp_gaps {
 }
 
 # ---------------------------------------------------------------------------
+# Which files to compare
+# ---------------------------------------------------------------------------
+
+# The version sql/<ext>.sql.in currently builds. Read rather than hardcoded so a
+# release does not have to remember this file.
+sub current_version {
+    my $path = "$ext.control";
+    open my $fh, '<', $path or usage_error("cannot read $path: $!");
+    local $/;
+    my ($v) = <$fh> =~ /^\s*default_version\s*=\s*'([^']+)'/m;
+    usage_error("no default_version in $path") unless defined $v;
+    return $v;
+}
+
+# A missing file is EMPTY, not skipped: skipping would pass silently on exactly
+# the omission this check exists to catch.
+sub first_existing { for (@_) { return $_ if -e } return '/dev/null' }
+
+sub install_script {
+    my ($v) = @_;
+    # The current version's own install script is a gitignored copy of the base
+    # file (see sql/.gitignore), so the base file stands in for it.
+    return "$sql_dir/$ext.sql.in" if $v eq current_version();
+    return first_existing("$sql_dir/$ext--$v.sql.in", "$sql_dir/$ext--$v.sql");
+}
+
+# The current cycle's pair, derived from the one accumulator update script
+# targeting the current version.
+sub current_pair {
+    my $cur = current_version();
+    # .sql.in first and only: a built tree also holds the .sql generated from
+    # it, and matching both would make this ambiguous exactly when someone has
+    # run make.
+    my @acc = glob "$sql_dir/$ext--*--$cur.sql.in";
+    @acc = glob "$sql_dir/$ext--*--$cur.sql" unless @acc;
+    usage_error("expected exactly one $sql_dir/$ext--*--$cur.sql.in, found " . scalar @acc)
+        unless @acc == 1 && $acc[0] =~ m{\Q$ext\E--(.+)--\Q$cur\E\.sql(?:\.in)?\z};
+    return ($1, $cur);
+}
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
-sub usage_error { print STDERR "$PROG: $_[0]\n"; exit 2 }
-
-my ($sql_dir, $ext, @versions, @paths) = ('sql', 'cat_tools');
+my (@versions, @paths);
 while (@ARGV) {
     my $a = shift @ARGV;
     if    ($a eq '--sql-dir')  { $sql_dir = shift @ARGV // usage_error('--sql-dir needs a value') }
@@ -299,17 +444,17 @@ while (@ARGV) {
     else                       { push @paths, $a }
 }
 
+@versions = current_pair() unless @versions || @paths;
+
 if (@versions) {
     usage_error('--versions needs OLD and NEW') unless @versions == 2;
     usage_error('--versions and positional paths are exclusive') if @paths;
     my ($o, $n) = @versions;
-    # A missing update script is EMPTY, not skipped: skipping would pass
-    # silently on exactly the omission this check exists to catch.
-    for my $stem ("$ext--$o", "$ext--$n", "$ext--$o--$n") {
-        my $p = "$sql_dir/$stem.sql.in";
-        $p = "$sql_dir/$stem.sql" unless -e $p;
-        push @paths, -e $p ? $p : '/dev/null';
-    }
+    @paths = (
+        install_script($o),
+        install_script($n),
+        first_existing("$sql_dir/$ext--$o--$n.sql.in", "$sql_dir/$ext--$o--$n.sql"),
+    );
 }
 usage_error('need three paths, or --versions OLD NEW') unless @paths == 3;
 
@@ -318,6 +463,12 @@ my @old = split_statements($old_text);
 my @new = split_statements($new_text);
 my $blob = normalized_blob($upd_text);
 my @waivers = parse_waivers($upd_text);
+
+my %old_enum;
+for my $st (@old) {
+    my ($name, $labels) = enum_labels($st->{norm});
+    $old_enum{ lc $name } = $labels if defined $name;
+}
 
 my %old_count;
 $old_count{ $_->{norm} }++ for @old;
@@ -333,30 +484,48 @@ push @added, $_ for grep { $budget{ $_->{norm} }-- > 0 } @new;
 push @removed, $_ for grep { $budget{ $_->{norm} }-- > 0 } @old;
 
 my (@fail, @waived);
-my $matched = 0;
+my ($matched, $scaffolding, $enum_ok) = (0, 0, 0);
+
+# $subject is what a waiver regex sees, $detail is what gets printed. For a
+# missing copy the subject is the bare statement, so a waiver can name the
+# object rather than this script's prose around it.
+my $finding = sub {
+    my ($where, $subject, $detail) = @_;
+    if (my $w = waive(\@waivers, $subject)) { push @waived, "$where: $w->{why}"; return }
+    push @fail, "$where: $detail";
+};
+
 for my $st (@added) {
+    my $where = "$paths[1]:$st->{line}";
+
     if (index($blob, $st->{norm}) >= 0) { $matched++; next }
-    if (my $w = waive(\@waivers, $st->{norm})) {
-        push @waived, "$paths[1]:$st->{line}: $w->{why}";
+    if (is_scaffolding($st->{norm}))    { $scaffolding++; next }
+
+    if (my $gaps = enum_gaps($st->{norm}, \%old_enum, $blob)) {
+        $enum_ok++ unless @$gaps;
+        $finding->($where, $_, $_) for @$gaps;
         next;
     }
-    push @fail, "$paths[1]:$st->{line}: added statement has no copy in $paths[2]\n"
-              . '    ' . abbrev($st->{norm});
+
+    $finding->($where, $st->{norm},
+        "added statement has no copy in $paths[2]\n    " . abbrev($st->{norm}));
 }
 
-for my $g (adp_gaps(\@old, \@new, $blob)) {
-    if (my $w = waive(\@waivers, $g)) { push @waived, "ADP: $w->{why}"; next }
-    push @fail, "$paths[2]: $g";
-}
+$finding->($paths[2], $_, $_) for adp_gaps(\@old, \@new, $blob);
 
-sub abbrev { my $s = shift; length($s) > 140 ? substr($s, 0, 137) . '...' : $s }
+# A waiver that matches nothing is a finding in its own right: either the
+# divergence it was written for is gone, or the statement changed underneath it
+# into something that has not been reviewed.
+push @fail, "$paths[2]: stale waiver /$_->{src}/ matches nothing -- $_->{why}"
+    for grep { !$_->{used} } @waivers;
 
 printf "%s\n  old %s (%d statements)\n  new %s (%d statements)\n  update %s\n",
     $PROG, $paths[0], scalar @old, $paths[1], scalar @new, $paths[2];
-printf "  added %d (matched %d, unmatched %d), removed %d (not checked -- see header)\n",
-    scalar @added, $matched, scalar @added - $matched, scalar @removed;
+printf "  added %d (matched %d, scaffolding %d, enum %d, unmatched %d)\n",
+    scalar @added, $matched, $scaffolding, $enum_ok,
+    scalar @added - $matched - $scaffolding - $enum_ok;
+printf "  removed %d (not checked -- see header)\n", scalar @removed;
 print "  waived $_\n" for @waived;
-print "  UNUSED WAIVER /$_->{src}/ -- $_->{why}\n" for grep { !$_->{used} } @waivers;
 
 if (@fail) {
     print "\n$_\n" for @fail;
@@ -365,3 +534,5 @@ if (@fail) {
 }
 print "  OK\n";
 exit 0;
+
+# vi: expandtab ts=4 sw=4
