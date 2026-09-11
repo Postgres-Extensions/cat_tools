@@ -90,10 +90,15 @@
 #   Any finding whose text matches REGEX is suppressed and the reason printed
 #   instead -- that text is the statement itself for a missing copy, and the
 #   message for every other rule, so /CREATE TYPE cat_tools.object_type/ reaches
-#   either. The reason is mandatory. A waiver that matches nothing FAILS rather
-#   than being quietly ignored, because a waiver that outlives its reason is how
-#   a check like this rots -- and because the statement it was written for may
-#   have changed underneath it into something that now needs review.
+#   either. The reason is mandatory.
+#
+#   Two rules keep a waiver from outliving its reason, which is how a check like
+#   this rots. A waiver that matches nothing FAILS rather than being quietly
+#   ignored -- either the divergence is gone, or the statement changed underneath
+#   it into something nobody has reviewed. And a line that opens with
+#   `-- update-lint` but does not parse is a hard error naming the line, never a
+#   no-op: a typo that silently drops the waiver hands the author a finding they
+#   believe they already waived, with nothing pointing at why.
 #
 #   Waivers live in the update script because that is the file being reviewed
 #   and the file the exception is a property of. The intent is a handful per
@@ -333,13 +338,22 @@ sub enum_gaps {
 # ---------------------------------------------------------------------------
 
 sub parse_waivers {
-    my ($text) = @_;
+    my ($text, $path) = @_;
     my @w;
+    my $lineno = 0;
     for my $line (split /\n/, $text) {
-        next unless $line =~ m{--\s*update-lint:\s*ok\s+/(.+?)/\s*(\S.*?)\s*\z};
+        $lineno++;
+        next unless $line =~ m{--\s*update-lint\b(.*)\z};
+        my $rest = $1;
+        # Anything that opens with the marker but does not parse is an error,
+        # never a no-op. Silently dropping it hands the author a finding they
+        # believe they already waived, with nothing pointing at the typo.
+        usage_error("$path:$lineno: malformed waiver, expected "
+                  . "`-- update-lint: ok /REGEX/ reason`:\n    $line")
+            unless $rest =~ m{\A:\s*ok\s+/(.+?)/\s*(\S.*?)\s*\z};
         my ($re, $why) = ($1, $2);
         my $qr = eval { qr/$re/i };
-        usage_error("bad regex in waiver: /$re/") unless $qr;
+        usage_error("$path:$lineno: bad regex in waiver: /$re/") unless $qr;
         push @w, { re => $qr, src => $re, why => $why, used => 0 };
     }
     return @w;
@@ -462,7 +476,7 @@ my ($old_text, $new_text, $upd_text) = map { read_file($_) } @paths;
 my @old = split_statements($old_text);
 my @new = split_statements($new_text);
 my $blob = normalized_blob($upd_text);
-my @waivers = parse_waivers($upd_text);
+my @waivers = parse_waivers($upd_text, $paths[2]);
 
 my %old_enum;
 for my $st (@old) {

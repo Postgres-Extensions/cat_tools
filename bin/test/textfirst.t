@@ -10,7 +10,7 @@
 
 use strict;
 use warnings;
-use Test::More tests => 27;
+use Test::More tests => 31;
 use File::Temp qw(tempdir);
 
 my $PROG = 'bin/update_lint_textfirst';
@@ -164,6 +164,22 @@ SQL
     );
     is $rc, 1, 'a waiver that matches nothing fails';
     like $out, qr{stale waiver /nothing matches this/}, '... and says which one';
+}
+
+# A typo must not degrade into "no waiver at all". Both of these would otherwise
+# leave the author staring at a finding they believe they already waived.
+for my $bad (
+    ['-- update-lint: ok /CREATE TABLE t/',             'a waiver with no reason'],
+    ['-- update-lint: okay /CREATE TABLE t/ mistyped',  'a mistyped waiver keyword'],
+) {
+    my ($line, $desc) = @$bad;
+    my ($rc, $out) = run_trio(
+        old    => "SELECT 1;\n",
+        new    => "SELECT 1;\nCREATE TABLE t (a int);\n",
+        update => "$line\n",
+    );
+    is $rc, 2, "$desc is a usage error, not a silent no-op";
+    like $out, qr/malformed waiver/, '... naming it as malformed';
 }
 
 # --- against the real tree --------------------------------------------------
