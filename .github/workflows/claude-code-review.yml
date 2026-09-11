@@ -192,4 +192,21 @@ jobs:
           # starts, the tool genuinely doesn't exist in the session, and the
           # plugin silently falls back to one consolidated PR comment instead
           # of real inline line comments.
-          claude_args: '--allowedTools mcp__github_inline_comment__create_inline_comment'
+          #
+          # The rest of this list closes the actual gap: --allowedTools is an
+          # allowlist in agent mode, so anything the plugin calls that isn't
+          # named here is silently denied rather than granted-by-default.
+          # `Bash(gh ...)` entries mirror the plugin's own `allowed-tools`
+          # frontmatter (anthropics/claude-code plugins/code-review/commands/
+          # code-review.md) verbatim -- that's the plugin telling us what it
+          # needs, not a guess. `Task` isn't in that frontmatter (core tools
+          # don't need frontmatter declaration in a normal session) but the
+          # command's steps 1-6 explicitly launch haiku/sonnet/opus subagents
+          # to do the actual review work, so without it there is no reviewer
+          # left to run. Confirmed against two runs that reached
+          # `"subtype": "success"` without ever posting a review
+          # (34648962488: num_turns 11, permission_denials_count 20;
+          # 34652912518: num_turns 6, permission_denials_count 23) -- neither
+          # `Task` nor any of these `gh` subcommands appeared in either run's
+          # actual SDK `allowedTools` dump.
+          claude_args: '--allowedTools mcp__github_inline_comment__create_inline_comment,Task,Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*)'
