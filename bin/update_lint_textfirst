@@ -19,10 +19,10 @@
 #
 # With no arguments it checks the only pair that is still editable: the current
 # development cycle. OLD is the last released install script, NEW is the base
-# sql/<ext>.sql.in, and the update script is the accumulator every SQL-touching
-# PR extends. Both version numbers are derived -- the current one from
-# <ext>.control's default_version, the previous one from the single accumulator
-# file named after it -- so a release needs no edit here. Released pairs are
+# sql/<ext>.sql.in, and the update script is the one every SQL-touching PR
+# extends. Both version numbers are derived -- the current one from
+# <ext>.control's default_version, the previous one from the single update
+# script named after it -- so a release needs no edit here. Released pairs are
 # frozen and are not in scope by default; running them by hand is a way to
 # validate this script, not a gate.
 #
@@ -79,11 +79,13 @@
 #   never got GRANT USAGE.
 #
 #   Narrow on purpose: only `IN SCHEMA <s> GRANT <p> ON TYPES TO <r>` is
-#   recognized. A FOR ROLE or a schema-less global ADP raises nothing, and
-#   TABLES/FUNCTIONS/SEQUENCES would each need their own "what creates one of
-#   these" pattern. This rule reproduces a known bug shape; it is not a general
-#   ADP analysis, and widening it into one is the kind of growth the limitations
-#   section argues against.
+#   understood, because TABLES/FUNCTIONS/SEQUENCES would each need their own
+#   "what creates one of these" pattern. Any other ADP form -- FOR ROLE, a
+#   schema-less global default, a category other than TYPES -- is REPORTED as
+#   unrecognized rather than skipped, so widening the rule stays a decision
+#   someone makes deliberately instead of a gap nobody notices. This reproduces
+#   a known bug shape; it is not a general ADP analysis, and widening it into
+#   one is the kind of growth the limitations section argues against.
 #
 # ESCAPE HATCH
 #
@@ -141,7 +143,9 @@
 #   - Waivers are read line by line, not through the scanner, so the marker is
 #     live even inside a string or a dollar-quoted body. Writing `-- update-lint`
 #     anywhere is taken to mean it; waivers are file-scoped, so a directive found
-#     in an odd place still behaves as written.
+#     in an odd place still behaves as written. The sharp edge: such a line that
+#     does not parse is a hard error naming a line that is not a comment at all.
+#     Known and left alone -- a second scanner costs more than the case is worth.
 #   - Any semantics-preserving edit that changes text is a false positive:
 #     reindenting a statement, reordering two GRANTs, hand-rewriting a helper
 #     call as the literal CREATE OR REPLACE FUNCTION it expands to, adding an
@@ -168,6 +172,9 @@ sub abbrev { my $s = shift; length($s) > 140 ? substr($s, 0, 137) . '...' : $s }
 # Input
 # ---------------------------------------------------------------------------
 
+# DUPLICATED AT sql.mk -- the sql/%.sql pattern rule's @generated@ sed and the
+# _apply_version_seds define. Both sides must stay in step.
+#
 # sql.mk resolves the @generated@ and `-- SED:` markers on the way to the
 # generated .sql; doing the identical substitutions here is what makes them
 # inert without special-casing them in the scanner. As in the released files,
@@ -365,7 +372,8 @@ sub waive {
 # ALTER DEFAULT PRIVILEGES (see header)
 #
 # Only the TYPES category is written. TABLES/FUNCTIONS/SEQUENCES/SCHEMAS would
-# each need their own "what creates one of these" pattern.
+# each need their own "what creates one of these" pattern, so any other form is
+# reported as unrecognized instead.
 # ---------------------------------------------------------------------------
 
 sub adp_gaps {
@@ -375,11 +383,24 @@ sub adp_gaps {
 
     for my $st (@$new) {
         next if $in_old{ $st->{norm} };    # already in force before OLD's objects were made
-        next unless $st->{norm} =~ /\A
+        next unless $st->{norm} =~ /\AALTER\s+DEFAULT\s+PRIVILEGES\b/i;
+
+        # /x ignores the layout whitespace below, so nothing here is a literal
+        # space; every gap between keywords is an explicit \s+, matching the
+        # single spaces split_statements already collapsed the statement to.
+        unless ($st->{norm} =~ /\A
             ALTER \s+ DEFAULT \s+ PRIVILEGES \s+
             IN \s+ SCHEMA \s+ (\S+) \s+
             GRANT \s+ (.+?) \s+ ON \s+ TYPES \s+ TO \s+ (\S+)
-        /xi;
+        /xi) {
+            # Report rather than skip. An ADP shape nobody taught this rule is
+            # exactly the case the rule exists for, so passing it silently is
+            # the failure it was written to prevent; waive it if it is fine.
+            push @gaps, "unrecognized ALTER DEFAULT PRIVILEGES form -- only "
+                      . "`IN SCHEMA <s> GRANT <p> ON TYPES TO <r>` is checked "
+                      . "(see header):\n    " . abbrev($st->{norm});
+            next;
+        }
         my ($schema, $privs, $role) = ($1, $2, $3);
 
         for my $o (@$old) {
@@ -422,8 +443,12 @@ sub install_script {
     return first_existing("$sql_dir/$ext--$v.sql.in", "$sql_dir/$ext--$v.sql");
 }
 
-# The current cycle's pair, derived from the one accumulator update script
-# targeting the current version.
+# The current cycle's pair, derived from the one update script targeting the
+# current version. OLD is a glob rather than a second lookup because a version
+# can be reachable from several others -- this tree ships both 0.2.0--0.2.2 and
+# 0.2.1--0.2.2 -- so the target version alone does not name a file. Exactly one
+# is still expected here: a development cycle has a single update script, and
+# two would mean the pair being checked is ambiguous.
 sub current_pair {
     my $cur = current_version();
     # .sql.in first and only: a built tree also holds the .sql generated from

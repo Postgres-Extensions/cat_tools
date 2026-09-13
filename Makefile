@@ -118,3 +118,12 @@ include lint.mk
 .PHONY: update-lint
 update-lint:
 	bin/update_lint_textfirst
+
+# Everything in bin/ that the rest of the suite leans on -- bin/test_existing
+# and bin/structural_diff drive the pgTAP runs, bin/update_lint_textfirst drives
+# `update-lint` above -- so run this before anything that uses them: a broken
+# tool otherwise reports as a broken extension. prove takes the directory, so a
+# new bin/test/*.t needs no edit here. Test::Harness is core Perl; no setup.
+.PHONY: test-bin
+test-bin:
+	prove bin/test/

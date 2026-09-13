@@ -11,7 +11,7 @@
 
 use strict;
 use warnings;
-use Test::More tests => 30;
+use Test::More tests => 32;
 use File::Temp qw(tempdir);
 
 my $PROG = 'bin/update_lint_textfirst';
@@ -178,6 +178,22 @@ for my $bad (
     like $out, qr/malformed waiver/, '... naming it as malformed';
 }
 
+# --- ALTER DEFAULT PRIVILEGES -----------------------------------------------
+
+{
+    # Only one ADP shape is understood. A different one must say so rather than
+    # pass as "nothing to see" -- a copy in the update script is not enough,
+    # since ADP does not reach objects that already exist.
+    my $adp = 'ALTER DEFAULT PRIVILEGES FOR ROLE r IN SCHEMA s GRANT USAGE ON TYPES TO u;';
+    my ($rc, $out) = run_trio(
+        old    => "SELECT 1;\n",
+        new    => "SELECT 1;\n$adp\n",
+        update => "$adp\n",
+    );
+    is $rc, 1, 'an ALTER DEFAULT PRIVILEGES form the rule cannot read fails';
+    like $out, qr/unrecognized ALTER DEFAULT PRIVILEGES form/, '... saying so, not skipping it';
+}
+
 # --- against the real tree --------------------------------------------------
 
 SKIP: {
@@ -188,7 +204,7 @@ SKIP: {
     my $out = qx{$^X $PROG 2>&1};
     is $? >> 8, 0, 'the current development pair is clean';
     like $out, qr{new sql/cat_tools\.sql\.in\b}, '... comparing against the base install script';
-    like $out, qr{update sql/cat_tools--\S+--stable\.sql\.in}, '... via the accumulator update script';
+    like $out, qr{update sql/cat_tools--\S+--stable\.sql\.in}, '... via this cycle\'s update script';
 
     # A released install script is a copy of the base file with sql.mk's
     # " VERSIONED FILE!" tag added to every @generated@ marker. One of those
