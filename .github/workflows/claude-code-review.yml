@@ -192,4 +192,28 @@ jobs:
           # starts, the tool genuinely doesn't exist in the session, and the
           # plugin silently falls back to one consolidated PR comment instead
           # of real inline line comments.
-          claude_args: '--allowedTools mcp__github_inline_comment__create_inline_comment'
+          #
+          # The rest of this list closes the actual gap: --allowedTools is an
+          # allowlist in agent mode, so anything the plugin calls that isn't
+          # named here is silently denied rather than granted-by-default.
+          # `Bash(gh ...)` entries mirror the plugin's own `allowed-tools`
+          # frontmatter (anthropics/claude-code plugins/code-review/commands/
+          # code-review.md) verbatim -- that's the plugin telling us what it
+          # needs, not a guess. `Task` isn't in that frontmatter (core tools
+          # don't need frontmatter declaration in a normal session) but the
+          # command's steps 1-5 explicitly launch haiku/sonnet/opus subagents
+          # to do the actual review work, so without it there is no reviewer
+          # left to run. `TodoWrite` likewise isn't a frontmatter entry, and
+          # isn't in the action's baseline tool set either -- the plugin's
+          # own Notes unconditionally say to create a todo list before
+          # starting.
+          #
+          # The whole value MUST stay one shell-quote token. YAML's own outer
+          # single quotes below are consumed by the YAML parser and never
+          # reach claude-code-action -- what it actually receives is the bare
+          # string after that, which it re-tokenizes with the `shell-quote`
+          # npm package, splitting on whitespace. The inner double quotes are
+          # what keep the value one token; without them the spaces inside
+          # each `Bash(gh ...)` entry split it into multiple garbage tokens
+          # instead of one tool name.
+          claude_args: '--allowedTools "mcp__github_inline_comment__create_inline_comment,Task,TodoWrite,Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*)"'
