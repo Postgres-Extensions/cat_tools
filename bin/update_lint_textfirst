@@ -1,0 +1,566 @@
+#!/usr/bin/env perl
+#
+# update_lint_textfirst - catch an install-script change whose update script
+# forgot to keep up, statically: no database, no SQL parser, seconds not
+# minutes.
+#
+# A PR that changes an extension's SQL must also extend
+# sql/<ext>--<old>--<new>.sql.in, or an existing install reaches a different
+# set of objects than a fresh one. Nothing fails when that is forgotten until a
+# runtime check that needs a database and minutes of CI.
+#
+# USAGE
+#
+#   bin/update_lint_textfirst                        # the current cycle
+#   bin/update_lint_textfirst --versions OLD NEW     # any other pair
+#   bin/update_lint_textfirst OLD NEW UPDATE         # explicit paths
+#   Options: --sql-dir DIR (default "sql"), --ext NAME (default "cat_tools").
+#   Exit: 0 clean, 1 findings, 2 usage error.
+#
+# With no arguments it checks the only pair that is still editable: the current
+# development cycle. OLD is the last released install script, NEW is the base
+# sql/<ext>.sql.in, and the update script is the one every SQL-touching PR
+# extends. Both version numbers are derived -- the current one from
+# <ext>.control's default_version, the previous one from the single update
+# script named after it -- so a release needs no edit here. Released pairs are
+# frozen and are not in scope by default; running them by hand is a way to
+# validate this script, not a gate.
+#
+# HOW IT WORKS
+#
+# Never build a model of what an object IS. Compare STATEMENT TEXT.
+#
+#   1. Split both install scripts into top-level statements (quote-, comment-
+#      and dollar-quote-aware, so a `;` inside any of those is not a boundary).
+#   2. Normalize each statement: drop comments, collapse whitespace.
+#   3. Multiset-diff the two normalized statement lists. In NEW but not OLD is
+#      "added"; in OLD but not NEW is "removed".
+#   4. Every added statement must appear, normalized, SOMEWHERE in the
+#      normalized update script -- substring match against the whole file, not
+#      statement against statement, so a copy wrapped in a DO block, a format()
+#      or an IF still matches.
+#   5. Anything left over is a finding; exit non-zero.
+#
+# That works because update scripts are overwhelmingly copy-paste from the
+# install script. Aim it at the small, subtle diffs -- a changed function body,
+# a changed GRANT, a tweaked view definition. A whole new object is hard to miss
+# in a diff of the install script between two versions, so nothing here chases
+# that case, and the deliberate cost of that choice is that this stays small.
+#
+# The interesting content is therefore not the matcher. It is the short list of
+# cases where a copy is impossible, below, plus the escape hatch for the rest.
+#
+# ENUM LABELS -- out of scope, checked properly elsewhere
+#
+#   A changed CREATE TYPE ... AS ENUM whose type already existed in OLD is
+#   exempt, and deliberately so: enum contents are verified at runtime by the
+#   pgTAP suite, which asserts them against the catalog. See the limitations
+#   below for why that is the right place and this is not.
+#
+# SCAFFOLDING
+#
+#   Statements that create or drop an object in the __<ext> schema are exempt.
+#   That schema is created at the top of the install script and dropped at the
+#   bottom, so nothing in it survives CREATE EXTENSION and no divergence there
+#   can leave an updated database short an object; the update script's own copy
+#   of a helper is free to be bound to whatever names existed when it was
+#   written. Only definitions are exempt, never calls: a
+#   `SELECT __cat_tools.create_function('cat_tools.foo', ...)` creates a real
+#   object and is still checked.
+#
+# ALTER DEFAULT PRIVILEGES
+#
+#   ADP is not retroactive, so a copy of it in the update script is not enough.
+#   When NEW's install adds an ADP that OLD's install did not have, every object
+#   of that category that ALREADY EXISTED in OLD needs an explicit GRANT in the
+#   update script; only objects created after the ADP runs inherit it. That is a
+#   real bug in this tree's history and the acceptance test for this rule:
+#   --versions 0.2.1 0.2.2 flags the five enum types created in 0.2.0/0.2.1 that
+#   never got GRANT USAGE.
+#
+#   Narrow on purpose: only `IN SCHEMA <s> GRANT <p> ON TYPES TO <r>` is
+#   understood, because TABLES/FUNCTIONS/SEQUENCES would each need their own
+#   "what creates one of these" pattern. Any other ADP form -- FOR ROLE, a
+#   schema-less global default, a category other than TYPES -- is REPORTED as
+#   unrecognized rather than skipped, so widening the rule stays a decision
+#   someone makes deliberately instead of a gap nobody notices. This reproduces
+#   a known bug shape; it is not a general ADP analysis, and widening it into
+#   one is the kind of growth the limitations section argues against.
+#
+# ESCAPE HATCH
+#
+#   A waiver comment in the UPDATE script:
+#
+#       -- update-lint: ok /REGEX/ reason
+#
+#   Any finding whose text matches REGEX is suppressed and the reason printed
+#   instead -- that text is the statement itself for a missing copy, and the
+#   message for every other rule, so /CREATE TYPE cat_tools.object_type/ reaches
+#   either. The reason is mandatory.
+#
+#   Two rules keep a waiver from outliving its reason, which is how a check like
+#   this rots. A waiver that matches nothing FAILS rather than being quietly
+#   ignored -- either the divergence is gone, or the statement changed underneath
+#   it into something nobody has reviewed. And a line that opens with
+#   `-- update-lint` but does not parse is a hard error naming the line, never a
+#   no-op: a typo that silently drops the waiver hands the author a finding they
+#   believe they already waived, with nothing pointing at why.
+#
+#   Waivers live in the update script because that is the file being reviewed
+#   and the file the exception is a property of. The intent is a handful per
+#   release on genuine exceptions, never one per statement.
+#
+# LIMITATIONS
+#
+# Each case below is declined, not missing. The rule that decides what belongs
+# here is: ask what the right way to verify THIS case is. Where text comparison
+# is genuinely easy it is used; where it is awkward, that awkwardness is evidence
+# the case belongs to a different mechanism -- a runtime catalog comparison, or
+# an explicit test -- and not to a cleverer parser. Growing this script to reach
+# one of them would cost far more than it bought.
+#
+#   - THIS COMPARES TEXT, SO A DIVERGENCE THAT IS INVISIBLE IN THE SQL BUT REAL
+#     IN THE CATALOG IS INVISIBLE HERE. Demonstrated, not hypothetical: defect
+#     D1 in https://github.com/Postgres-Extensions/cat_tools/issues/93 had a
+#     fresh and an updated install agreeing on every ACL and every
+#     has_type_privilege answer while differing in five pg_init_privs rows,
+#     because ALTER DEFAULT PRIVILEGES grants implicitly and an implicit grant
+#     is never snapshotted -- so the two produced different pg_dump output.
+#     bin/structural_diff called them identical too. That class needs a
+#     pg_init_privs or pg_dump comparison; nothing text-level can reach it.
+#   - ENUM LABEL CHANGES ARE OUT OF SCOPE, because a better mechanism already
+#     covers them. The pgTAP suite runs the SAME expected output against a fresh
+#     install, an updated database and a pg_upgraded one (see CLAUDE.md's
+#     TEST_LOAD_SOURCE), so an install and an update script that disagree about
+#     an enum's labels make one of those runs fail against the real catalog --
+#     stronger than anything this could assert about text. A changed CREATE TYPE
+#     ... AS ENUM is therefore exempt here rather than waived. Only a type OLD
+#     already had is exempt; a brand-new enum copies into the update script
+#     verbatim like any other new object, so the ordinary rule covers it.
+#   - Removals are counted and listed but never failed on. A DROP does not
+#     appear in an install script, so a removed statement can only be matched by
+#     inference, never by copy.
+#   - Waivers are read line by line, not through the scanner, so the marker is
+#     live even inside a string or a dollar-quoted body. Writing `-- update-lint`
+#     anywhere is taken to mean it; waivers are file-scoped, so a directive found
+#     in an odd place still behaves as written. The sharp edge: such a line that
+#     does not parse is a hard error naming a line that is not a comment at all.
+#     Known and left alone -- a second scanner costs more than the case is worth.
+#   - Any semantics-preserving edit that changes text is a false positive:
+#     reindenting a statement, reordering two GRANTs, hand-rewriting a helper
+#     call as the literal CREATE OR REPLACE FUNCTION it expands to, adding an
+#     overload. The escape hatch is the answer; there is no cheaper one.
+#   - Substring-against-the-whole-file is loose in the other direction. A
+#     statement copied into a comment, into a format() template that is never
+#     executed, or into an `IF false` branch counts as matched.
+#   - A statement that is present in both installs but whose runtime effect
+#     changed because something it calls changed is not seen at all.
+
+use strict;
+use warnings;
+
+my $PROG = 'bin/update_lint_textfirst';
+
+# Set from @ARGV below, but declared here so the subs close over them.
+my ($sql_dir, $ext) = ('sql', 'cat_tools');
+
+sub usage_error { print STDERR "$PROG: $_[0]\n"; exit 2 }
+
+sub abbrev { my $s = shift; length($s) > 140 ? substr($s, 0, 137) . '...' : $s }
+
+# ---------------------------------------------------------------------------
+# Input
+# ---------------------------------------------------------------------------
+
+# DUPLICATED AT sql.mk -- the sql/%.sql pattern rule's @generated@ sed and the
+# _apply_version_seds define. Both sides must stay in step.
+#
+# sql.mk resolves the @generated@ and `-- SED:` markers on the way to the
+# generated .sql; doing the identical substitutions here is what makes them
+# inert without special-casing them in the scanner. As in the released files,
+# PRIOR TO branches are commented out: every marker in this tree names a
+# PostgreSQL below the support floor, so the REQUIRES branch is the one that
+# installs everywhere.
+#
+# The " VERSIONED FILE!" tag sql.mk appends when it copies the base file to a
+# versioned one must collapse to the same text, because one @generated@ sits
+# inside __cat_tools.create_function()'s dollar-quoted body, where a comment is
+# body text the splitter cannot strip. Left distinct, that one marker makes
+# every release's copy of that function differ from the base file's for a
+# reason that has nothing to do with the extension's contents.
+sub preprocess {
+    my ($text) = @_;
+    $text =~ s/\@generated\@(?:\s+VERSIONED\s+FILE!)?/-- GENERATED FILE! DO NOT EDIT!/g;
+    $text =~ s/^(.*)-- SED: PRIOR TO ([^!\n]*)!/-- Not used prior to $2: $1/gm;
+    return $text;
+}
+
+sub read_file {
+    my ($path) = @_;
+    open my $fh, '<', $path or usage_error("cannot read $path: $!");
+    usage_error("$path is not a plain file") unless -f $fh || -c $fh;
+    local $/;
+    my $t = <$fh>;
+    close $fh;
+    return preprocess(defined $t ? $t : '');
+}
+
+# ---------------------------------------------------------------------------
+# Splitter
+#
+# One left-to-right pass. Comment bodies are replaced by a single space as they
+# are consumed, which is both the comment strip and the whitespace collapse
+# seed; everything else is copied through verbatim so that quoted text is never
+# reinterpreted. A `;` only ends a statement when the pass is not inside a
+# quote, a dollar-quote or a comment, which is the entire reason this is a
+# scanner and not a split /;/.
+# ---------------------------------------------------------------------------
+
+sub split_statements {
+    my ($text) = @_;
+    my (@stmts, $cur);
+    my ($i, $n, $line, $stmt_line) = (0, length($text), 1, 1);
+    $cur = '';
+
+    my $flush = sub {
+        my $norm = $cur;
+        $norm =~ s/\s+/ /g;
+        $norm =~ s/\A | \z//g;
+        push @stmts, { norm => $norm, line => $stmt_line } if $norm =~ /\S/;
+        $cur = '';
+    };
+
+    while ($i < $n) {
+        my $two = substr($text, $i, 2);
+
+        if ($two eq '--') {
+            my $j = index($text, "\n", $i);
+            $j = $n if $j < 0;
+            $i = $j;
+            $cur .= ' ';
+            next;
+        }
+        if ($two eq '/*') {    # PostgreSQL block comments nest
+            my ($depth, $j) = (1, $i + 2);
+            while ($j < $n && $depth) {
+                my $t = substr($text, $j, 2);
+                if    ($t eq '/*') { $depth++; $j += 2 }
+                elsif ($t eq '*/') { $depth--; $j += 2 }
+                else               { $line++ if substr($text, $j, 1) eq "\n"; $j++ }
+            }
+            $i = $j;
+            $cur .= ' ';
+            next;
+        }
+
+        my $c = substr($text, $i, 1);
+
+        if ($c eq q{'} || $c eq q{"}) {
+            my $j = $i + 1;
+            while ($j < $n) {
+                if (substr($text, $j, 1) eq $c) {
+                    last unless substr($text, $j + 1, 1) eq $c;    # '' escapes '
+                    $j += 2;
+                    next;
+                }
+                $line++ if substr($text, $j, 1) eq "\n";
+                $j++;
+            }
+            $cur .= substr($text, $i, $j - $i + 1);
+            $i = $j + 1;
+            next;
+        }
+
+        if ($c eq '$' && substr($text, $i) =~ /\A(\$(?:[A-Za-z_]\w*)?\$)/) {
+            my $tag = $1;
+            my $j = index($text, $tag, $i + length $tag);
+            $j = $n - length($tag) if $j < 0;
+            my $chunk = substr($text, $i, $j - $i + length $tag);
+            $line += ($chunk =~ tr/\n//);
+            $cur .= $chunk;
+            $i = $j + length $tag;
+            next;
+        }
+
+        if ($c eq ';') {
+            $flush->();
+            $i++;
+            $stmt_line = $line;
+            next;
+        }
+
+        $line++ if $c eq "\n";
+        $stmt_line = $line if $cur !~ /\S/;    # first real char sets the line
+        $cur .= $c;
+        $i++;
+    }
+    $flush->();
+    return @stmts;
+}
+
+# The haystack for rule 4: the whole update file as one normalized string, so a
+# statement copied into a DO block, a format() template or an IF branch still
+# matches even though it is not a top-level statement over there.
+sub normalized_blob {
+    my ($text) = @_;
+    return join ' ; ', map { $_->{norm} } split_statements($text);
+}
+
+# ---------------------------------------------------------------------------
+# Scaffolding (see header)
+# ---------------------------------------------------------------------------
+
+sub is_scaffolding {
+    my ($norm) = @_;
+    return $norm =~ m{\A
+        (?: CREATE | DROP ) \s+ (?: OR \s+ REPLACE \s+ )?
+        (?: SCHEMA | FUNCTION | PROCEDURE | TYPE | DOMAIN | TABLE | VIEW ) \s+
+        (?: IF \s+ (?: NOT \s+ )? EXISTS \s+ )?
+        __\Q$ext\E \b
+    }xi;
+}
+
+# ---------------------------------------------------------------------------
+# Enum labels (see header)
+# ---------------------------------------------------------------------------
+
+sub enum_type_name {
+    my ($norm) = @_;
+    return $norm =~ /\ACREATE\s+TYPE\s+(\S+)\s+AS\s+ENUM\b/i ? lc $1 : undef;
+}
+
+# ---------------------------------------------------------------------------
+# Waivers (see header)
+# ---------------------------------------------------------------------------
+
+sub parse_waivers {
+    my ($text, $path) = @_;
+    my @w;
+    my $lineno = 0;
+    for my $line (split /\n/, $text) {
+        $lineno++;
+        next unless $line =~ m{--\s*update-lint\b(.*)\z};
+        my $rest = $1;
+        # Opening with the marker is enough to mean it: anything past that which
+        # does not parse is an error, never a no-op (see header).
+        #
+        # Whitespace, not the first `/`, is what closes the regex -- otherwise a
+        # regex containing a `/` (an operator, a character class, a path) would
+        # truncate at it and silently waive something narrower than written.
+        usage_error("$path:$lineno: malformed waiver, expected "
+                  . "`-- update-lint: ok /REGEX/ reason`:\n    $line")
+            unless $rest =~ m{\A:\s*ok\s+/(.+?)/\s+(\S.*?)\s*\z};
+        my ($re, $why) = ($1, $2);
+        my $qr = eval { qr/$re/i };
+        usage_error("$path:$lineno: bad regex in waiver: /$re/") unless $qr;
+        push @w, { re => $qr, src => $re, why => $why, used => 0 };
+    }
+    return @w;
+}
+
+sub waive {
+    my ($waivers, $subject) = @_;
+    for my $w (@$waivers) {
+        next unless $subject =~ $w->{re};
+        $w->{used}++;
+        return $w;
+    }
+    return undef;
+}
+
+# ---------------------------------------------------------------------------
+# ALTER DEFAULT PRIVILEGES (see header)
+#
+# Only the TYPES category is written. TABLES/FUNCTIONS/SEQUENCES/SCHEMAS would
+# each need their own "what creates one of these" pattern, so any other form is
+# reported as unrecognized instead.
+# ---------------------------------------------------------------------------
+
+sub adp_gaps {
+    my ($old, $new, $update_blob) = @_;
+    my %in_old = map { $_->{norm} => 1 } @$old;
+    my @gaps;
+
+    for my $st (@$new) {
+        next if $in_old{ $st->{norm} };    # already in force before OLD's objects were made
+        next unless $st->{norm} =~ /\AALTER\s+DEFAULT\s+PRIVILEGES\b/i;
+
+        # /x ignores the layout whitespace below, so nothing here is a literal
+        # space; every gap between keywords is an explicit \s+, matching the
+        # single spaces split_statements already collapsed the statement to.
+        unless ($st->{norm} =~ /\A
+            ALTER \s+ DEFAULT \s+ PRIVILEGES \s+
+            IN \s+ SCHEMA \s+ (\S+) \s+
+            GRANT \s+ (.+?) \s+ ON \s+ TYPES \s+ TO \s+ (\S+)
+        /xi) {
+            # Report rather than skip. An ADP shape nobody taught this rule is
+            # exactly the case the rule exists for, so passing it silently is
+            # the failure it was written to prevent; waive it if it is fine.
+            push @gaps, "unrecognized ALTER DEFAULT PRIVILEGES form -- only "
+                      . "`IN SCHEMA <s> GRANT <p> ON TYPES TO <r>` is checked "
+                      . "(see header):\n    " . abbrev($st->{norm});
+            next;
+        }
+        my ($schema, $privs, $role) = ($1, $2, $3);
+
+        for my $o (@$old) {
+            next unless $o->{norm} =~ /\ACREATE\s+(TYPE|DOMAIN)\s+(\S+)/i;
+            my ($what, $name) = (uc $1, $2);
+            next unless $name =~ /\A\Q$schema\E\./;
+            next if $update_blob =~ /GRANT\s+\Q$privs\E\s+ON\s+(?:$what\s+)?\Q$name\E\s+TO\s+\Q$role\E/i;
+            push @gaps, "$what $name predates the new ALTER DEFAULT PRIVILEGES; "
+                      . "update script needs an explicit "
+                      . "GRANT $privs ON $what $name TO $role";
+        }
+    }
+    return @gaps;
+}
+
+# ---------------------------------------------------------------------------
+# Which files to compare
+# ---------------------------------------------------------------------------
+
+# The version sql/<ext>.sql.in currently builds. Read rather than hardcoded so a
+# release does not have to remember this file.
+sub current_version {
+    my $path = "$ext.control";
+    open my $fh, '<', $path or usage_error("cannot read $path: $!");
+    local $/;
+    my ($v) = <$fh> =~ /^\s*default_version\s*=\s*'([^']+)'/m;
+    usage_error("no default_version in $path") unless defined $v;
+    return $v;
+}
+
+# A missing file is EMPTY, not skipped: skipping would pass silently on exactly
+# the omission this check exists to catch.
+sub first_existing { for (@_) { return $_ if -e } return '/dev/null' }
+
+sub install_script {
+    my ($v) = @_;
+    # The current version's own install script is a gitignored copy of the base
+    # file (see sql/.gitignore), so the base file stands in for it.
+    return "$sql_dir/$ext.sql.in" if $v eq current_version();
+    return first_existing("$sql_dir/$ext--$v.sql.in", "$sql_dir/$ext--$v.sql");
+}
+
+# The current cycle's pair, derived from the one update script targeting the
+# current version. OLD is a glob rather than a second lookup because a version
+# can be reachable from several others -- this tree ships both 0.2.0--0.2.2 and
+# 0.2.1--0.2.2 -- so the target version alone does not name a file. Exactly one
+# is still expected here: a development cycle has a single update script, and
+# two would mean the pair being checked is ambiguous.
+sub current_pair {
+    my $cur = current_version();
+    # .sql.in first and only: a built tree also holds the .sql generated from
+    # it, and matching both would make this ambiguous exactly when someone has
+    # run make.
+    my @acc = glob "$sql_dir/$ext--*--$cur.sql.in";
+    @acc = glob "$sql_dir/$ext--*--$cur.sql" unless @acc;
+    usage_error("expected exactly one $sql_dir/$ext--*--$cur.sql.in, found " . scalar @acc)
+        unless @acc == 1 && $acc[0] =~ m{\Q$ext\E--(.+)--\Q$cur\E\.sql(?:\.in)?\z};
+    return ($1, $cur);
+}
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+my (@versions, @paths);
+while (@ARGV) {
+    my $a = shift @ARGV;
+    if    ($a eq '--sql-dir')  { $sql_dir = shift @ARGV // usage_error('--sql-dir needs a value') }
+    elsif ($a eq '--ext')      { $ext     = shift @ARGV // usage_error('--ext needs a value') }
+    elsif ($a eq '--versions') { @versions = splice @ARGV, 0, 2 }
+    elsif ($a =~ /\A-/)        { usage_error("unknown option $a") }
+    else                       { push @paths, $a }
+}
+
+@versions = current_pair() unless @versions || @paths;
+
+if (@versions) {
+    usage_error('--versions needs OLD and NEW') unless @versions == 2;
+    usage_error('--versions and positional paths are exclusive') if @paths;
+    my ($o, $n) = @versions;
+    @paths = (
+        install_script($o),
+        install_script($n),
+        first_existing("$sql_dir/$ext--$o--$n.sql.in", "$sql_dir/$ext--$o--$n.sql"),
+    );
+}
+usage_error('need three paths, or --versions OLD NEW') unless @paths == 3;
+
+my ($old_text, $new_text, $upd_text) = map { read_file($_) } @paths;
+my @old = split_statements($old_text);
+my @new = split_statements($new_text);
+my $blob = normalized_blob($upd_text);
+my @waivers = parse_waivers($upd_text, $paths[2]);
+
+my %old_enum;
+for my $st (@old) {
+    my $name = enum_type_name($st->{norm});
+    $old_enum{$name} = 1 if defined $name;
+}
+
+my %old_count;
+$old_count{ $_->{norm} }++ for @old;
+my %new_count;
+$new_count{ $_->{norm} }++ for @new;
+
+# Multiset, not set: two identical statements in NEW against one in OLD is one
+# addition. The budget hash is what makes the second copy stop counting.
+my (@added, @removed, %budget);
+%budget = map { $_ => $new_count{$_} - ($old_count{$_} // 0) } keys %new_count;
+push @added, $_ for grep { $budget{ $_->{norm} }-- > 0 } @new;
+%budget = map { $_ => $old_count{$_} - ($new_count{$_} // 0) } keys %old_count;
+push @removed, $_ for grep { $budget{ $_->{norm} }-- > 0 } @old;
+
+my (@fail, @waived);
+my ($matched, $scaffolding, $enum) = (0, 0, 0);
+
+# $subject is what a waiver regex sees, $detail is what gets printed. For a
+# missing copy the subject is the bare statement, so a waiver can name the
+# object rather than this script's prose around it.
+my $finding = sub {
+    my ($where, $subject, $detail) = @_;
+    if (my $w = waive(\@waivers, $subject)) { push @waived, "$where: $w->{why}"; return }
+    push @fail, "$where: $detail";
+};
+
+for my $st (@added) {
+    my $where = "$paths[1]:$st->{line}";
+
+    if (index($blob, $st->{norm}) >= 0) { $matched++; next }
+    if (is_scaffolding($st->{norm}))    { $scaffolding++; next }
+
+    my $enum_name = enum_type_name($st->{norm});
+    if (defined $enum_name && $old_enum{$enum_name}) { $enum++; next }
+
+    $finding->($where, $st->{norm},
+        "added statement has no copy in $paths[2]\n    " . abbrev($st->{norm}));
+}
+
+$finding->($paths[2], $_, $_) for adp_gaps(\@old, \@new, $blob);
+
+# A waiver that matches nothing is a finding in its own right: either the
+# divergence it was written for is gone, or the statement changed underneath it
+# into something that has not been reviewed.
+push @fail, "$paths[2]: stale waiver /$_->{src}/ matches nothing -- $_->{why}"
+    for grep { !$_->{used} } @waivers;
+
+printf "%s\n  old %s (%d statements)\n  new %s (%d statements)\n  update %s\n",
+    $PROG, $paths[0], scalar @old, $paths[1], scalar @new, $paths[2];
+printf "  added %d (matched %d, scaffolding %d, enum %d, unmatched %d)\n",
+    scalar @added, $matched, $scaffolding, $enum,
+    scalar @added - $matched - $scaffolding - $enum;
+printf "  removed %d (not checked -- see header)\n", scalar @removed;
+print "  waived $_\n" for @waived;
+
+if (@fail) {
+    print "\n$_\n" for @fail;
+    printf STDERR "\n%s: FAIL, %d finding(s)\n", $PROG, scalar @fail;
+    exit 1;
+}
+print "  OK\n";
+exit 0;
+
+# vi: expandtab ts=4 sw=4

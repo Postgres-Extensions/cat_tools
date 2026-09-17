@@ -55,6 +55,13 @@ documented in `../ai/CLAUDE.md` or pgxntool's own docs.
   `.sql` directly (historical exception; see `sql/.gitignore`).
 - Never hand-edit a generated `.sql` file — edit the `.sql.in` (or, for
   the base file, `sql/cat_tools.sql.in`) and regenerate.
+- **A change to `sql/cat_tools.sql.in` must also extend the update
+  script `sql/cat_tools--<last-released>--stable.sql.in`**, so an
+  existing install reaches the same objects. `make update-lint` checks
+  that statically (no database) and runs in CI's `lint` job; see
+  `bin/update_lint_textfirst`'s header for what it catches, what it
+  cannot, and the `-- update-lint: ok /REGEX/ reason` escape hatch for
+  deliberate divergence.
 
 See [`../ai/CLAUDE.md`](../ai/CLAUDE.md) for the general (pgxntool-level)
 rules this preprocessing sits on top of: why version-specific install and

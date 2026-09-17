@@ -394,6 +394,10 @@ jobs:
     steps:
       - name: Check out the repo
         uses: actions/checkout@v7
+      - name: Test bin/
+        # First, before anything that uses bin/: a bug in the tooling should be
+        # reported as a bug in the tooling, not as a finding against the SQL.
+        run: make test-bin
       - name: Lint SQL
         # CRITICAL: call `make lint` directly, not some other path (a script, a
         # different target, etc). lint.mk's vendored include is guarded on
@@ -404,6 +408,12 @@ jobs:
         # wrapper that swallows that exit code or calls a different entry point
         # would defeat this safety net.
         run: make lint
+      - name: Check the update script covers this cycle's install-script changes
+        # Static and database-free (see bin/update_lint_textfirst's header),
+        # which is why it rides this job rather than the pgxn-tools container.
+        # A step, not a job: all-checks-passed hard-fails when the workflow's
+        # job-key set differs from its `needs:`.
+        run: make update-lint
 
   # cancel-on-close.yml cancels in-flight CI/claude-review runs on PR close by
   # joining the SAME concurrency group strings this workflow and
