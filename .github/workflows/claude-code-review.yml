@@ -1,195 +1,27 @@
 name: Claude Code Review
 
-# Runs on PRs INTO this repo. We use pull_request_target (not pull_request) so
-# that PRs from a fork can access CLAUDE_CODE_OAUTH_TOKEN — GitHub withholds
-# secrets from `pull_request` runs triggered by forks, which is why the plain
-# `pull_request` version never worked for fork PRs.
+# MANDATORY: read ../ai/CI-WORKFLOWS.md (Postgres-Extensions/ai) in full
+# before changing anything below. If you cannot find or read that file for
+# any reason, STOP and report an error -- do not guess at what it says or
+# proceed without having actually read it.
 #
-# SECURITY: pull_request_target runs in the BASE repo with secrets and a
-# write-capable token. The job is gated to PRs from the trusted `jnasbyupgrade`
-# fork only — an arbitrary external fork can never trigger this secret-bearing
-# job. The workflow file always comes from the base branch (master), so a PR
-# cannot modify the reviewer that runs on it. We never check out the fork's PR
-# head ourselves here: anthropics/claude-code-action's own internal checkout
-# logic (setupBranch() in src/github/operations/branch.ts) already fetches the
-# PR branch via `git fetch origin pull/<N>/head`, which requires `origin` to be
-# the BASE repo -- checking out the fork directly instead (as a prior version
-# of this file did) points `origin` at the fork, which has no such ref, and
-# breaks that fetch with "couldn't find remote ref pull/<N>/head".
+# Exceptions to that file's design, specific to this repo: none.
 on:
   pull_request_target:
-    # labeled: lets adding the claude-debug label (see the "Check for
-    # claude-debug label" step below) kick off a fresh run by itself, with no
-    # push/re-run needed. Scoped in the job's `if:` below to only actually
-    # proceed when the label added IS claude-debug -- otherwise every
-    # unrelated label added to a PR would trigger another paid review.
     types: [opened, synchronize, reopened, ready_for_review, labeled]
 
 concurrency:
-  # Concurrency cancellation resolves when a run is admitted, before the
-  # job's `if:` is evaluated -- a job's `if:` can only no-op itself, it can't
-  # un-cancel whatever the run already displaced. So only a labeled event
-  # whose label is NOT claude-debug gets its own per-label group here,
-  # keeping it from ever colliding with (and cancelling) the real review's
-  # group. labeled+claude-debug deliberately keeps the plain group, since
-  # it's meant to supersede an in-progress review.
   group: claude-review-${{ github.event.pull_request.number }}${{ (github.event.action == 'labeled' && github.event.label.name != 'claude-debug') && format('-{0}', github.event.label.name) || '' }}
   cancel-in-progress: true
 
 jobs:
   claude-review:
-    # Trusted author only, and skip drafts (don't spend API/CI on unfinished PRs).
-    # To add more trusted authors, extend the author check.
-    #
-    # SECURITY-CRITICAL: this author check is what makes it safe to run this
-    # pull_request_target job -- which holds base-repo secrets/token -- on
-    # every fork PR unattended. Do not remove or loosen this condition (e.g.
-    # drop the author check, or allow untrusted authors) without re-evaluating
-    # whether this job should keep running on arbitrary forks.
-    #
-    # NOTE: this checks the PR AUTHOR (user.login), not head.repo.owner.login.
-    # head.repo.owner.login only identifies "who owns the fork" for fork-headed
-    # PRs -- for an upstream-branch-headed PR (base and head both in this repo,
-    # e.g. from `gh stack`, or `gh pr create` without a fork), it's always this
-    # repo's own org, never the actual author, so that check silently skipped
-    # review on every such PR regardless of who opened it.
-    if: >-
-      github.event.pull_request.draft == false &&
-      github.event.pull_request.user.login == 'jnasbyupgrade' &&
-      (github.event.action != 'labeled' || github.event.label.name == 'claude-debug')
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
+    uses: Postgres-Extensions/ai/.github/workflows/claude-code-review.yml@main
     permissions:
       contents: read
-      pull-requests: write   # post the review comments
-      checks: read           # read sibling check-runs for the cost gate
-      # GitHub has no narrower "cache write" scope -- actions: write is the
-      # only permission that lets a step save an Actions cache entry (it also
-      # grants cancelling/deleting workflow runs and managing artifacts, which
-      # this job doesn't use). Without it, claude-code-review's own setup step
-      # can never write a cache, only ever miss. Granted here on top of the
-      # existing trusted-fork-owner gate below, not instead of it.
+      pull-requests: write
+      checks: read
       actions: write
-    steps:
-      # DEBUG MODE: add the "claude-debug" label to a PR to (a) skip the cost
-      # gate below entirely -- a debug session shouldn't wait 5-20+ min per
-      # iteration on sibling CI -- and (b) get show_full_output: true on the
-      # Run Claude Code Review step, dumping the full raw Claude Code JSON
-      # transcript (including tool results -- see that input's own WARNING
-      # below) to the job log. This is how you'd catch something like a
-      # silently-swallowed `--comment` flag (see that step's other comment).
-      # Queried live via `gh pr view`, not the static event payload, so
-      # adding the label and clicking "Re-run jobs" on an existing run picks
-      # it up without needing a new push.
-      - name: Check for claude-debug label
-        id: debug
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-          PR: ${{ github.event.pull_request.number }}
-        run: |
-          enabled=$(gh pr view "$PR" --repo "$REPO" --json labels \
-                      --jq 'any(.labels[]; .name == "claude-debug")' 2>/dev/null) || enabled=false
-          echo "enabled=$enabled" >> "$GITHUB_OUTPUT"
-          echo "claude-debug label present: $enabled"
-
-      # COST GATE: the paid Claude review is the last thing to run. Wait for the
-      # PR head's OTHER check-runs to finish and only proceed if they are clean.
-      # If any sibling check failed we skip the review to avoid spending money
-      # reviewing a PR that is already known-broken. Uniform across all repos:
-      # it discovers sibling checks dynamically (no per-repo workflow names).
-      #   - decision=run  : all sibling checks completed with a good conclusion,
-      #                     OR no sibling checks exist after a short grace window
-      #                     (nothing to gate on), OR the poll timed out is treated
-      #                     as skip (see below).
-      #   - decision=skip : at least one sibling check failed/cancelled/etc, or
-      #                     we timed out waiting for still-pending checks.
-      # We exclude this workflow's own check-run (job name `claude-review`) so the
-      # gate never waits on or fails because of itself.
-      - name: Wait for CI; skip the paid review if any check failed
-        id: gate
-        if: steps.debug.outputs.enabled != 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-          SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          decision=skip
-          for i in $(seq 1 72); do   # ~24 min max
-            json=$(gh api "repos/$REPO/commits/$SHA/check-runs" --paginate \
-                     --jq '[.check_runs[] | select(.name != "claude-review")]' 2>/dev/null) || json=''
-            [ -z "$json" ] && { sleep 20; continue; }
-            total=$(jq 'length' <<<"$json")
-            if [ "$total" -eq 0 ]; then
-              [ "$i" -ge 9 ] && { decision=run; break; }   # ~3 min grace: nothing to gate on
-              sleep 20; continue
-            fi
-            pending=$(jq '[.[]|select(.status!="completed")]|length' <<<"$json")
-            if [ "$pending" -eq 0 ]; then
-              bad=$(jq '[.[]|select((.conclusion//"")|test("^(failure|cancelled|timed_out|action_required|stale)$"))]|length' <<<"$json")
-              [ "$bad" -eq 0 ] && decision=run || decision=skip
-              break
-            fi
-            sleep 20
-          done
-          echo "decision=$decision" >> "$GITHUB_OUTPUT"
-          echo "gate decision: $decision"
-
-      - name: Check out base branch
-        if: steps.debug.outputs.enabled == 'true' || steps.gate.outputs.decision == 'run'
-        # Intentionally tracks the major-version tag (not a pinned SHA) so
-        # upstream fixes are picked up automatically.
-        #
-        # No `repository:`/`ref:` here on purpose — this checks out the base
-        # branch (master), never the fork's PR head. See the SECURITY note
-        # above; anthropics/claude-code-action fetches the actual PR head
-        # itself afterward via the base repo's `refs/pull/<N>/head` ref.
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 1
-          persist-credentials: false
-
-      - name: Run Claude Code Review
-        if: steps.debug.outputs.enabled == 'true' || steps.gate.outputs.decision == 'run'
-        uses: anthropics/claude-code-action@v1
-        with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          # See the "Check for claude-debug label" step above -- WARNING (from
-          # this input's own description): outputs ALL Claude messages
-          # including tool execution results, which may contain secrets, and
-          # these logs are publicly visible in GitHub Actions.
-          show_full_output: ${{ steps.debug.outputs.enabled == 'true' }}
-          # Provide github_token so the action uses it directly for GitHub API
-          # calls instead of the OIDC->GitHub-App-token exchange, which 401s under
-          # pull_request_target. GITHUB_TOKEN is repo/workflow-scoped (independent
-          # of the actor's role) and has pull-requests: write here.
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          # A `prompt:` input puts the action in "automation mode", which by
-          # default posts nothing until the whole run finishes -- there's no
-          # visibility into a review that runs long. track_progress forces a
-          # tracking PR comment with a live checklist that updates as Claude
-          # works, so a slow run is visible instead of silent.
-          track_progress: true
-          # NOTE: plugin_marketplaces can't be pinned — it tracks the
-          # marketplace repo's default branch (upstream anthropics/claude-code).
-          plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
-          plugins: 'code-review@claude-code-plugins'
-          # --comment is required: without it, the code-review plugin only
-          # prints its findings to the job log and never posts anything to
-          # the PR (confirmed by capturing the hidden SDK transcript on a
-          # canary PR in pgxntool-test: the review correctly found an
-          # injected bug but ended with "No `--comment` argument was
-          # provided, so no GitHub comments were posted"). Every review run
-          # before this fix has been silently invisible on GitHub.
-          prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }} --comment'
-          # A direct `prompt:` (no @claude mention) runs the action in "agent
-          # mode". In that mode, claude-code-action only installs the
-          # github_inline_comment MCP server if it sees
-          # mcp__github_inline_comment__create_inline_comment listed in an
-          # --allowedTools flag inside claude_args (src/modes/agent/parse-tools.ts) --
-          # it does NOT look at the code-review plugin's own `allowed-tools`
-          # frontmatter to decide that. Without this, the MCP server never
-          # starts, the tool genuinely doesn't exist in the session, and the
-          # plugin silently falls back to one consolidated PR comment instead
-          # of real inline line comments.
-          claude_args: '--allowedTools mcp__github_inline_comment__create_inline_comment'
+    secrets: inherit
+    with:
+      trusted_authors: jnasbyupgrade
