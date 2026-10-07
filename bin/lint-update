@@ -36,9 +36,9 @@
 #      do-not-edit tag) through end of line, so its ` VERSIONED FILE!` variant
 #      in released copies compares equal. Any other text after a marker is an
 #      error (exit 2).
-#   2. Normalize each statement: collapse whitespace. A comment inside a
-#      statement is kept (an object's text should be literally identical in
-#      both scripts); a comment between statements is dropped.
+#   2. Normalize each statement: collapse whitespace. An unquoted comment
+#      inside a statement is kept (update-script copies are expected to be
+#      verbatim); a comment between statements is dropped.
 #   3. Multiset-diff the two normalized statement lists. In NEW but not OLD is
 #      "added"; in OLD but not NEW is "removed".
 #   4. Every added statement must appear, normalized, SOMEWHERE in the
@@ -156,10 +156,13 @@
 #     reindenting a statement, reordering two GRANTs, hand-rewriting a helper
 #     call as the literal CREATE OR REPLACE FUNCTION it expands to, adding an
 #     overload. The escape hatch is the answer; there is no cheaper one.
-#   - A comment-only edit inside a non-routine statement (a view, a table, an
-#     enum list) is a false positive, because PostgreSQL does not keep that
-#     comment. The fix is a copy in the update script or a waiver; for a table it
-#     can only be a waiver.
+#   - A comment-only edit outside quotes inside any statement is reported, by
+#     design: update-script copies are expected to be verbatim. It needs a
+#     verbatim copy in the update script or a waiver; for a table, only a waiver.
+#   - A kept `--` comment in a top-level statement does not match when the update
+#     script carries that statement inside a DO or format() body, because the
+#     body's newline after the comment is not the <EOL> marker the install side
+#     gets. It fails loudly, never silently; waive it.
 #   - A `@generated@` marker followed on its line by anything but ` VERSIONED
 #     FILE!` (a closing `*/`, a quote, more code) is rejected with exit 2 rather
 #     than analyzed, because deleting the rest of the line could remove a
@@ -186,12 +189,11 @@ sub abbrev { my $s = shift; length($s) > 140 ? substr($s, 0, 137) . '...' : $s }
 # Input
 # ---------------------------------------------------------------------------
 
-# Deleting `@generated@` through end of line removes the marker from every
-# copy, including the one inside __cat_tools.create_function()'s dollar-quoted
-# body. That is only sound when nothing but sql.mk's own tag follows the marker
-# on its line (the build turns the marker into a `--` comment, so the tag is
-# comment text); anything else could be a closing `*/`, quote or dollar-quote
-# delimiter that the deletion would swallow, so it is an error.
+# Deletes `@generated@` through end of line in every copy, including the one
+# inside __cat_tools.create_function()'s dollar-quoted body. That is only sound
+# when nothing but sql.mk's own tag follows the marker on its line; anything
+# else could be a closing `*/`, quote or dollar-quote delimiter the deletion
+# would swallow, so it is an error.
 sub preprocess {
     my ($text, $path) = @_;
     $text =~ s{\@generated\@([^\n]*)}{
@@ -241,10 +243,9 @@ sub split_statements {
         $cur = '';
     };
 
-    # Comments between statements never reach an installed extension and would
-    # otherwise attach to the next statement's text. Comments inside a statement
-    # are compared, so an object's text (a routine body especially) stays
-    # literally identical between the install and update scripts.
+    # Unquoted comments inside a statement are compared because update-script
+    # copies are expected to be verbatim, though PostgreSQL does not store them.
+    # Comments between statements would otherwise attach to the next statement.
     # A kept `--` comment ends in <EOL>, since the newline that ends it is lost
     # to whitespace collapse and code moving across it would otherwise match.
     my $keep_comment = sub {

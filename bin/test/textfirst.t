@@ -1,11 +1,11 @@
 #!/usr/bin/env perl
 #
-# One case per rule bin/lint-update implements, plus the three things
-# only the real tree can prove: that the current development pair is clean, that
-# the ALTER DEFAULT PRIVILEGES rule reproduces the historical bug it was written
+# One case per rule bin/lint-update implements, plus the three things only the
+# real tree can prove: that the current development pair is clean, that the
+# ALTER DEFAULT PRIVILEGES rule reproduces the historical bug it was written
 # for, and that the @generated@ marker inside a function body causes no false
-# positive. Kept deliberately small -- a checker whose test suite dwarfs it has stopped being
-# the cheap option. Run from the repo root:
+# positive. Kept deliberately small -- a checker whose test suite dwarfs it has
+# stopped being the cheap option. Run from the repo root:
 #
 #     prove bin/test/textfirst.t
 
