@@ -234,6 +234,7 @@ sql/%.sql: sql/%.sql.in pgxntool/safesed
 # Appends " VERSIONED FILE!" after every @generated@ occurrence; the pattern
 # rule above resolves the leading @generated@ either way, so the tag rides
 # through into the final marker text untouched.
+# DUPLICATED AT bin/lint-update's preprocess() guard: keep the tag text in sync.
 $(EXTENSION__CURRENT_VERSION__FILES:.sql=.sql.in): sql/cat_tools.sql.in cat_tools.control
 	sed -e 's/@generated@/@generated@ VERSIONED FILE!/' $< > $@
 

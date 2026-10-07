@@ -198,6 +198,7 @@ sub preprocess {
     my ($text, $path) = @_;
     $text =~ s{\@generated\@([^\n]*)}{
         my $rest = $1;
+        # DUPLICATED AT sql.mk (the sed that appends the tag): keep the tag text in sync.
         if ($rest ne '' && $rest ne ' VERSIONED FILE!') {
             my $ln = 1 + (substr($text, 0, $-[0]) =~ tr/\n//);
             usage_error("$path:$ln: text after \@generated\@ other than "
