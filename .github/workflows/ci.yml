@@ -317,8 +317,9 @@ jobs:
   # PG12+, where it is updated to the current version.
   # ===========================================================================
   test:
-    needs: [changes]
-    if: needs.changes.outputs.docs_only != 'true'
+    # lint takes seconds and needs no container, so a failure stops the matrix before it starts.
+    needs: [changes, lint]
+    if: success() && needs.changes.outputs.docs_only != 'true'
     strategy:
       matrix:
         # Current-supported majors, from the single source in the changes job.
