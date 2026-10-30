@@ -114,7 +114,7 @@ include lint.mk
 # guarded on $(wildcard .git), so `lint` does not exist as a target in a
 # released tarball and `make lint` fails loudly there; naming it as a
 # prerequisite would define it with no recipe and turn that loud failure into a
-# silent pass. `update-lint` is a legacy synonym for `lint--update`.
+# silent pass. `update-lint` is a synonym for `lint--update`, for people who remember the name backwards.
 .PHONY: lint--update update-lint
 lint--update update-lint:
 	bin/lint--update
@@ -123,12 +123,12 @@ lint--update update-lint:
 # Separate from lint--update because that one needs no build or PostgreSQL,
 # while the processed text depends on MAJORVER, so CI runs this per major in
 # the `test` job.
-.PHONY: update-lint-processed
+.PHONY: lint--update-processed
 # DUPLICATED AT bin/lint--update current_pair(): keep the derivation in sync.
-UPDATE_LINT_CUR := $(patsubst sql/cat_tools--%.sql,%,$(EXTENSION__CURRENT_VERSION__FILES))
-UPDATE_LINT_UPD := $(patsubst %.sql.in,%.sql,$(wildcard sql/cat_tools--*--$(UPDATE_LINT_CUR).sql.in))
-UPDATE_LINT_OLD := $(patsubst sql/cat_tools--%--$(UPDATE_LINT_CUR).sql,sql/cat_tools--%.sql,$(UPDATE_LINT_UPD))
-update-lint-processed: $(EXTENSION__CURRENT_VERSION__FILES) $(UPDATE_LINT_OLD) $(UPDATE_LINT_UPD)
+LINT_UPDATE_CUR := $(patsubst sql/cat_tools--%.sql,%,$(EXTENSION__CURRENT_VERSION__FILES))
+LINT_UPDATE_UPD := $(patsubst %.sql.in,%.sql,$(wildcard sql/cat_tools--*--$(LINT_UPDATE_CUR).sql.in))
+LINT_UPDATE_OLD := $(patsubst sql/cat_tools--%--$(LINT_UPDATE_CUR).sql,sql/cat_tools--%.sql,$(LINT_UPDATE_UPD))
+lint--update-processed: $(EXTENSION__CURRENT_VERSION__FILES) $(LINT_UPDATE_OLD) $(LINT_UPDATE_UPD)
 	bin/lint--update --processed
 
 # Everything in bin/ that the rest of the suite leans on -- bin/test_existing

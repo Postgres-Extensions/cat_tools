@@ -340,7 +340,7 @@ jobs:
       - name: Check the generated update script covers the generated install script
         # Per major because the generated text depends on the PostgreSQL major; the raw check in
         # `lint` runs once on the .sql.in sources.
-        run: make update-lint-processed
+        run: make lint--update-processed
       - name: Test on PostgreSQL ${{ matrix.pg }}
         run: |
           # Fail if the relkind drift source is empty (headers missing): the

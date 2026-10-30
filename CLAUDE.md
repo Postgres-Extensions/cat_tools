@@ -57,7 +57,7 @@ documented in `../ai/CLAUDE.md` or pgxntool's own docs.
   the base file, `sql/cat_tools.sql.in`) and regenerate.
 - `make lint--update` (CI's `lint` job) checks the update-script rule in
   `../ai/RELEASE.md`'s "Ongoing development"; see `bin/lint--update`'s
-  header for its limits and the `-- update-lint: ok /REGEX/ reason`
+  header for its limits and the `-- lint--update: ok /REGEX/ reason`
   waiver.
 
 See [`../ai/CLAUDE.md`](../ai/CLAUDE.md) for the general (pgxntool-level)

@@ -64,7 +64,7 @@
 #   Raw (default) compares the pre-SED .sql.in text, with both branches of any
 #   `-- SED:` line live. It needs no build and no PostgreSQL, so it runs in the
 #   `lint` job. --processed compares what sql.mk generated for ONE PostgreSQL
-#   major (the text that actually installs); `make update-lint-processed`
+#   major (the text that actually installs); `make lint--update-processed`
 #   builds those files first and CI runs it in every `test` leg. With no paths
 #   it derives sql/<ext>--<last-released>.sql, sql/<ext>--<default_version>.sql
 #   and sql/<ext>--<last-released>--<default_version>.sql. No SED is resolved
@@ -111,7 +111,7 @@
 #
 #   A waiver comment in the UPDATE script:
 #
-#       -- update-lint: ok /REGEX/ reason
+#       -- lint--update: ok /REGEX/ reason
 #
 #   Any finding whose text matches REGEX is suppressed and the reason printed
 #   instead -- that text is the statement itself for a missing copy, and the
@@ -122,7 +122,7 @@
 #   this rots. A waiver that matches nothing FAILS rather than being quietly
 #   ignored -- either the divergence is gone, or the statement changed underneath
 #   it into something nobody has reviewed. And a line that opens with
-#   `-- update-lint` but does not parse is a hard error naming the line, never a
+#   `-- lint--update` but does not parse is a hard error naming the line, never a
 #   no-op: a typo that silently drops the waiver hands the author a finding they
 #   believe they already waived, with nothing pointing at why.
 #
@@ -161,7 +161,7 @@
 #     appear in an install script, so a removed statement can only be matched by
 #     inference, never by copy.
 #   - Waivers are read line by line, not through the scanner, so the marker is
-#     live even inside a string or a dollar-quoted body. Writing `-- update-lint`
+#     live even inside a string or a dollar-quoted body. Writing `-- lint--update`
 #     anywhere is taken to mean it; waivers are file-scoped, so a directive found
 #     in an odd place still behaves as written. The sharp edge: such a line that
 #     does not parse is a hard error naming a line that is not a comment at all.
@@ -386,7 +386,7 @@ sub parse_waivers {
     my $lineno = 0;
     for my $line (split /\n/, $text) {
         $lineno++;
-        next unless $line =~ m{--\s*update-lint\b(.*)\z};
+        next unless $line =~ m{--\s*lint--update\b(.*)\z};
         my $rest = $1;
         # Opening with the marker is enough to mean it: anything past that which
         # does not parse is an error, never a no-op (see header).
@@ -395,7 +395,7 @@ sub parse_waivers {
         # regex containing a `/` (an operator, a character class, a path) would
         # truncate at it and silently waive something narrower than written.
         usage_error("$path:$lineno: malformed waiver, expected "
-                  . "`-- update-lint: ok /REGEX/ reason`:\n    $line")
+                  . "`-- lint--update: ok /REGEX/ reason`:\n    $line")
             unless $rest =~ m{\A:\s*ok\s+/(.+?)/\s+(\S.*?)\s*\z};
         my ($re, $why) = ($1, $2);
         my $qr = eval { qr/$re/i };
@@ -496,7 +496,7 @@ sub install_script {
 # 0.2.1--0.2.2 -- so the target version alone does not name a file. Exactly one
 # is still expected here: a development cycle has a single update script, and
 # two would mean the pair being checked is ambiguous.
-# DUPLICATED AT Makefile (the UPDATE_LINT_* derivation): keep in sync.
+# DUPLICATED AT Makefile (the LINT_UPDATE_* derivation): keep in sync.
 sub current_pair {
     my $cur = current_version();
     # .sql.in first and only: a built tree also holds the .sql generated from
@@ -532,7 +532,7 @@ if (@versions) {
     my ($o, $n) = @versions;
     # No /dev/null fallback here: a missing generated file would pass on nothing.
     @paths = $processed ? (map {
-        -e $_ or usage_error("$_ does not exist; run `make update-lint-processed` to generate it");
+        -e $_ or usage_error("$_ does not exist; run `make lint--update-processed` to generate it");
         $_;
     } "$sql_dir/$ext--$o.sql", "$sql_dir/$ext--$n.sql", "$sql_dir/$ext--$o--$n.sql") : (
         install_script($o),
@@ -603,7 +603,7 @@ push @fail, "$paths[2]: stale waiver /$_->{src}/ matches nothing -- $_->{why}"
 printf "%s\n  old %s (%d statements)\n  new %s (%d statements)\n  update %s\n",
     $PROG, $paths[0], scalar @old, $paths[1], scalar @new, $paths[2];
 print "  processed mode: these files are generated from .sql.in; fix the .sql.in, "
-    . "reproduce with `make update-lint-processed`\n" if $processed;
+    . "reproduce with `make lint--update-processed`\n" if $processed;
 printf "  added %d (matched %d, scaffolding %d, enum %d, unmatched %d)\n",
     scalar @added, $matched, $scaffolding, $enum,
     scalar @added - $matched - $scaffolding - $enum;

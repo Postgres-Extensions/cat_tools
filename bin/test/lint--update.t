@@ -213,7 +213,7 @@ SQL
     my ($rc, $out) = run_trio(
         old    => "SELECT 1;\n",
         new    => "SELECT 1;\nCREATE TABLE t (a int);\n",
-        update => "-- update-lint: ok /CREATE TABLE t/ hand-rewritten below\n"
+        update => "-- lint--update: ok /CREATE TABLE t/ hand-rewritten below\n"
                 . "CREATE TABLE t (a int NOT NULL);\n",
     );
     is $rc, 0, 'a waiver suppresses the finding';
@@ -224,7 +224,7 @@ SQL
     my ($rc, $out) = run_trio(
         old    => "SELECT 1;\n",
         new    => "SELECT 1;\n",
-        update => "-- update-lint: ok /nothing matches this/ stale\n",
+        update => "-- lint--update: ok /nothing matches this/ stale\n",
     );
     is $rc, 1, 'a waiver that matches nothing fails';
     like $out, qr{stale waiver /nothing matches this/}, '... and says which one';
@@ -236,7 +236,7 @@ SQL
     my ($rc, $out) = run_trio(
         old    => "SELECT 1;\n",
         new    => "SELECT 1;\nSELECT a/b;\n",
-        update => "-- update-lint: ok /a/b/ division is fine\n",
+        update => "-- lint--update: ok /a/b/ division is fine\n",
     );
     is $rc, 0, 'a waiver regex may contain a slash';
     like $out, qr/waived .*division is fine/, '... and keeps the whole reason';
@@ -245,8 +245,8 @@ SQL
 # A typo must not degrade into "no waiver at all". Both of these would otherwise
 # leave the author staring at a finding they believe they already waived.
 for my $bad (
-    ['-- update-lint: ok /CREATE TABLE t/',             'a waiver with no reason'],
-    ['-- update-lint: okay /CREATE TABLE t/ mistyped',  'a mistyped waiver keyword'],
+    ['-- lint--update: ok /CREATE TABLE t/',             'a waiver with no reason'],
+    ['-- lint--update: okay /CREATE TABLE t/ mistyped',  'a mistyped waiver keyword'],
 ) {
     my ($line, $desc) = @$bad;
     my ($rc, $out) = run_trio(
@@ -306,7 +306,7 @@ for my $bad (
     my $cmd = "$^X $PROG --processed --sql-dir $sd --versions 1.0 2.0 2>&1";
     my $out = qx{$cmd};
     is $? >> 8, 2, '--processed with a missing derived file is a usage error, not a pass on /dev/null';
-    like $out, qr/make update-lint-processed/, '... telling the user how to generate it';
+    like $out, qr/make lint--update-processed/, '... telling the user how to generate it';
 
     for my $f ("cat_tools--1.0.sql", "cat_tools--2.0.sql", "cat_tools--1.0--2.0.sql") {
         open my $fh, '>', "$sd/$f" or die $!;
@@ -314,7 +314,7 @@ for my $bad (
     }
     $out = qx{$cmd};
     is $? >> 8, 0, '--processed over the three (empty) derived files runs';
-    like $out, qr/^  processed mode: .*fix the \.sql\.in.*make update-lint-processed/m,
+    like $out, qr/^  processed mode: .*fix the \.sql\.in.*make lint--update-processed/m,
         '... and prints the processed-mode hint';
 
     $out = qx{$^X $PROG --sql-dir $sd --versions 1.0 2.0 2>&1};
