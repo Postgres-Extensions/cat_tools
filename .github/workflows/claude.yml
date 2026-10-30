@@ -1,5 +1,11 @@
 name: Claude Code
 
+# MANDATORY: read ../ai/CI-WORKFLOWS.md (Postgres-Extensions/ai) in full
+# before changing anything below. If you cannot find or read that file for
+# any reason, STOP and report an error -- do not guess at what it says or
+# proceed without having actually read it.
+#
+# Exceptions to that file's design, specific to this repo: none.
 on:
   issue_comment:
     types: [created]
@@ -10,42 +16,15 @@ on:
   pull_request_review:
     types: [submitted]
 
-# No concurrency limit: @claude mentions are independent, read-only requests;
-# serializing would only delay responses and cancelling would drop them.
 jobs:
   claude:
-    # SECURITY: restricts @claude to a single trusted account, not just
-    # matching comment text — otherwise anyone could trigger this job.
-    if: |
-      github.actor == 'jnasbyupgrade' &&
-      (
-        (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
-        (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
-        (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
-        (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
-      )
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+    uses: Postgres-Extensions/ai/.github/workflows/claude.yml@main
     permissions:
       contents: read
       pull-requests: read
       issues: read
       id-token: write
-      actions: read # Required for Claude to read CI results on PRs
-    steps:
-      - name: Checkout repository
-        # Intentionally tracks the major-version tag (not a pinned SHA) so
-        # upstream fixes are picked up automatically.
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 1
-          persist-credentials: false
-
-      - name: Run Claude Code
-        id: claude
-        uses: anthropics/claude-code-action@v1
-        with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          # Allows Claude to read CI results on PRs
-          additional_permissions: |
-            actions: read
+      actions: write
+    secrets: inherit
+    with:
+      trusted_actors: jnasbyupgrade
