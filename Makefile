@@ -114,13 +114,13 @@ include lint.mk
 # guarded on $(wildcard .git), so `lint` does not exist as a target in a
 # released tarball and `make lint` fails loudly there; naming it as a
 # prerequisite would define it with no recipe and turn that loud failure into a
-# silent pass. `lint--update` is a synonym for `update-lint`.
-.PHONY: update-lint lint--update
-update-lint lint--update:
+# silent pass. `update-lint` is a legacy synonym for `lint--update`.
+.PHONY: lint--update update-lint
+lint--update update-lint:
 	bin/lint--update
 
 # The same check over the generated .sql files (what actually installs).
-# Separate from update-lint because that one needs no build or PostgreSQL,
+# Separate from lint--update because that one needs no build or PostgreSQL,
 # while the processed text depends on MAJORVER, so CI runs this per major in
 # the `test` job.
 .PHONY: update-lint-processed
@@ -133,7 +133,7 @@ update-lint-processed: $(EXTENSION__CURRENT_VERSION__FILES) $(UPDATE_LINT_OLD) $
 
 # Everything in bin/ that the rest of the suite leans on -- bin/test_existing
 # and bin/structural_diff drive the pgTAP runs, bin/lint--update drives
-# `update-lint` above -- so run this before anything that uses them: a broken
+# `lint--update` above -- so run this before anything that uses them: a broken
 # tool otherwise reports as a broken extension. prove takes the directory, so a
 # new bin/test/*.t needs no edit here. Test::Harness is core Perl; no setup.
 .PHONY: test-bin

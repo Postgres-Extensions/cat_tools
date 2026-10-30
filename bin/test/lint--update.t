@@ -2,17 +2,19 @@
 #
 # Self-test for bin/lint--update: feeds it synthetic OLD/NEW/UPDATE scripts and
 # asserts its exit code and output. It does not test the SQL itself.
-# Run it with `make test-bin` (CI's `lint` job does, before `make update-lint`),
-# so a checker bug is not reported as a finding against the SQL.
+# Run it from the repo root with `make test-bin`, or alone with
+# `prove bin/test/lint--update.t`. CI's `lint` job runs `make test-bin` before
+# `make lint--update`, so a checker bug is not reported as a finding against
+# the SQL.
 #
 # One case per rule bin/lint--update implements, plus the three things only the
 # real tree can prove: that the current development pair is clean, that the
 # ALTER DEFAULT PRIVILEGES rule reproduces the historical bug it was written
 # for, and that the @generated@ marker inside a function body causes no false
-# positive. Kept deliberately small -- a checker whose test suite dwarfs it has
-# stopped being the cheap option. Run from the repo root:
+# positive.
 #
-#     prove bin/test/lint--update.t
+# Kept deliberately small: a checker whose test suite dwarfs it has stopped
+# being the cheap option.
 
 use strict;
 use warnings;
