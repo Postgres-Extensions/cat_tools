@@ -226,7 +226,7 @@ endef
 # plain, unanchored substring match -- it also fires on a handful of
 # coincidental @generated@ occurrences inside real-code comments in
 # cat_tools.sql.in, which is harmless (already inside a -- comment).
-# DUPLICATED AT bin/lint-update's preprocess() --processed regex, and the sibling recipe below.
+# DUPLICATED AT bin/lint--update's preprocess() --processed regex, and the sibling recipe below.
 sql/%.sql: sql/%.sql.in pgxntool/safesed
 	(echo @generated@ && cat $< && echo @generated@) | sed -e 's#@generated@#-- GENERATED FILE! DO NOT EDIT! See $<#' > $@.tmp
 	$(_apply_version_seds)
@@ -235,12 +235,12 @@ sql/%.sql: sql/%.sql.in pgxntool/safesed
 # Appends " VERSIONED FILE!" after every @generated@ occurrence; the pattern
 # rule above resolves the leading @generated@ either way, so the tag rides
 # through into the final marker text untouched.
-# DUPLICATED AT bin/lint-update's preprocess() guard: keep the tag text in sync.
+# DUPLICATED AT bin/lint--update's preprocess() guard: keep the tag text in sync.
 $(EXTENSION__CURRENT_VERSION__FILES:.sql=.sql.in): sql/cat_tools.sql.in cat_tools.control
 	sed -e 's/@generated@/@generated@ VERSIONED FILE!/' $< > $@
 
 # See the overview above for why this duplicates the pattern rule's recipe.
-# DUPLICATED AT bin/lint-update's preprocess() --processed regex, and the pattern rule above.
+# DUPLICATED AT bin/lint--update's preprocess() --processed regex, and the pattern rule above.
 $(EXTENSION__CURRENT_VERSION__FILES): $(EXTENSION__CURRENT_VERSION__FILES:.sql=.sql.in) pgxntool/safesed
 	(echo @generated@ && cat $< && echo @generated@) | sed -e 's#@generated@#-- GENERATED FILE! DO NOT EDIT! See $<#' > $@.tmp
 	$(_apply_version_seds)

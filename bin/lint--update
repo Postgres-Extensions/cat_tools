@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 #
-# lint-update - catch an install-script change whose update script
+# lint--update - catch an install-script change whose update script
 # forgot to keep up, statically: no database, no SQL parser, seconds not
 # minutes.
 #
@@ -11,10 +11,10 @@
 #
 # USAGE
 #
-#   bin/lint-update                        # the current cycle
-#   bin/lint-update --versions OLD NEW     # any other pair
-#   bin/lint-update OLD NEW UPDATE         # explicit paths
-#   bin/lint-update --processed [...]      # the generated .sql files, not .sql.in
+#   bin/lint--update                        # the current cycle
+#   bin/lint--update --versions OLD NEW     # any other pair
+#   bin/lint--update OLD NEW UPDATE         # explicit paths
+#   bin/lint--update --processed [...]      # the generated .sql files, not .sql.in
 #   Options: --sql-dir DIR (default "sql"), --ext NAME (default "cat_tools").
 #   Exit: 0 clean, 1 findings, 2 usage error.
 #
@@ -190,7 +190,7 @@
 use strict;
 use warnings;
 
-my $PROG = 'bin/lint-update';
+my $PROG = 'bin/lint--update';
 
 # Set from @ARGV below, but declared here so the subs close over them.
 my ($sql_dir, $ext) = ('sql', 'cat_tools');

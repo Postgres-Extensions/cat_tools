@@ -1,25 +1,25 @@
 #!/usr/bin/env perl
 #
-# Self-test for bin/lint-update: feeds it synthetic OLD/NEW/UPDATE scripts and
+# Self-test for bin/lint--update: feeds it synthetic OLD/NEW/UPDATE scripts and
 # asserts its exit code and output. It does not test the SQL itself.
 # Run it with `make test-bin` (CI's `lint` job does, before `make update-lint`),
 # so a checker bug is not reported as a finding against the SQL.
 #
-# One case per rule bin/lint-update implements, plus the three things only the
+# One case per rule bin/lint--update implements, plus the three things only the
 # real tree can prove: that the current development pair is clean, that the
 # ALTER DEFAULT PRIVILEGES rule reproduces the historical bug it was written
 # for, and that the @generated@ marker inside a function body causes no false
 # positive. Kept deliberately small -- a checker whose test suite dwarfs it has
 # stopped being the cheap option. Run from the repo root:
 #
-#     prove bin/test/lint-update.t
+#     prove bin/test/lint--update.t
 
 use strict;
 use warnings;
 use Test::More tests => 52;
 use File::Temp qw(tempdir);
 
-my $PROG = 'bin/lint-update';
+my $PROG = 'bin/lint--update';
 my $DIR  = tempdir(CLEANUP => 1);
 
 # Write an OLD/NEW/UPDATE trio and run the linter over it.

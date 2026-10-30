@@ -107,32 +107,32 @@ LINT_TARGETS = sql/cat_tools.sql.in test/
 include lint.mk
 
 # Static check that this cycle's update script accounts for every change to the
-# install script -- no database, no SQL parser. See bin/lint-update's
+# install script -- no database, no SQL parser. See bin/lint--update's
 # header for what it does and does not catch.
 #
 # Deliberately NOT tied to `lint` in either direction. lint.mk's include is
 # guarded on $(wildcard .git), so `lint` does not exist as a target in a
 # released tarball and `make lint` fails loudly there; naming it as a
 # prerequisite would define it with no recipe and turn that loud failure into a
-# silent pass. `lint-update` is a synonym for `update-lint`.
-.PHONY: update-lint lint-update
-update-lint lint-update:
-	bin/lint-update
+# silent pass. `lint--update` is a synonym for `update-lint`.
+.PHONY: update-lint lint--update
+update-lint lint--update:
+	bin/lint--update
 
 # The same check over the generated .sql files (what actually installs).
 # Separate from update-lint because that one needs no build or PostgreSQL,
 # while the processed text depends on MAJORVER, so CI runs this per major in
 # the `test` job.
 .PHONY: update-lint-processed
-# DUPLICATED AT bin/lint-update current_pair(): keep the derivation in sync.
+# DUPLICATED AT bin/lint--update current_pair(): keep the derivation in sync.
 UPDATE_LINT_CUR := $(patsubst sql/cat_tools--%.sql,%,$(EXTENSION__CURRENT_VERSION__FILES))
 UPDATE_LINT_UPD := $(patsubst %.sql.in,%.sql,$(wildcard sql/cat_tools--*--$(UPDATE_LINT_CUR).sql.in))
 UPDATE_LINT_OLD := $(patsubst sql/cat_tools--%--$(UPDATE_LINT_CUR).sql,sql/cat_tools--%.sql,$(UPDATE_LINT_UPD))
 update-lint-processed: $(EXTENSION__CURRENT_VERSION__FILES) $(UPDATE_LINT_OLD) $(UPDATE_LINT_UPD)
-	bin/lint-update --processed
+	bin/lint--update --processed
 
 # Everything in bin/ that the rest of the suite leans on -- bin/test_existing
-# and bin/structural_diff drive the pgTAP runs, bin/lint-update drives
+# and bin/structural_diff drive the pgTAP runs, bin/lint--update drives
 # `update-lint` above -- so run this before anything that uses them: a broken
 # tool otherwise reports as a broken extension. prove takes the directory, so a
 # new bin/test/*.t needs no edit here. Test::Harness is core Perl; no setup.

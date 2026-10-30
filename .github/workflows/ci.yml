@@ -414,7 +414,7 @@ jobs:
         # would defeat this safety net.
         run: make lint
       - name: Check the update script covers this cycle's install-script changes
-        # Static and database-free (see bin/lint-update's header),
+        # Static and database-free (see bin/lint--update's header),
         # which is why it rides this job rather than the pgxn-tools container.
         # A step, not a job: all-checks-passed hard-fails when the workflow's
         # job-key set differs from its `needs:`.
