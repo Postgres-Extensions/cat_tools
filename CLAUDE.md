@@ -55,7 +55,7 @@ documented in `../ai/CLAUDE.md` or pgxntool's own docs.
   `.sql` directly (historical exception; see `sql/.gitignore`).
 - Never hand-edit a generated `.sql` file — edit the `.sql.in` (or, for
   the base file, `sql/cat_tools.sql.in`) and regenerate.
-- `make update-lint` (CI's `lint` job) checks the update-script rule in
+- `make lint--update` (CI's `lint` job) checks the update-script rule in
   `../ai/RELEASE.md`'s "Ongoing development"; see `bin/lint--update`'s
   header for its limits and the `-- update-lint: ok /REGEX/ reason`
   waiver.

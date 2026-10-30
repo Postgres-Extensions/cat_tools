@@ -418,7 +418,7 @@ jobs:
         # which is why it rides this job rather than the pgxn-tools container.
         # A step, not a job: all-checks-passed hard-fails when the workflow's
         # job-key set differs from its `needs:`.
-        run: make update-lint
+        run: make lint--update
 
   # cancel-on-close.yml cancels in-flight CI/claude-review runs on PR close by
   # joining the SAME concurrency group strings this workflow and
