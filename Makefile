@@ -105,3 +105,37 @@ clean_old_version:
 # `.vendor/linter/sql/bin/sql-lint sql/cat_tools--0.3.0.sql.in`.
 LINT_TARGETS = sql/cat_tools.sql.in test/
 include lint.mk
+
+# Static check that this cycle's update script accounts for every change to the
+# install script -- no database, no SQL parser. See bin/lint--update's
+# header for what it does and does not catch.
+#
+# Deliberately NOT tied to `lint` in either direction. lint.mk's include is
+# guarded on $(wildcard .git), so `lint` does not exist as a target in a
+# released tarball and `make lint` fails loudly there; naming it as a
+# prerequisite would define it with no recipe and turn that loud failure into a
+# silent pass. `update-lint` is a synonym for `lint--update`, for people who remember the name backwards.
+.PHONY: lint--update update-lint
+lint--update update-lint:
+	bin/lint--update
+
+# The same check over the generated .sql files (what actually installs).
+# Separate from lint--update because that one needs no build or PostgreSQL,
+# while the processed text depends on MAJORVER, so CI runs this per major in
+# the `test` job.
+.PHONY: lint--update-processed
+# DUPLICATED AT bin/lint--update current_pair(): keep the derivation in sync.
+LINT_UPDATE_CUR := $(patsubst sql/cat_tools--%.sql,%,$(EXTENSION__CURRENT_VERSION__FILES))
+LINT_UPDATE_UPD := $(patsubst %.sql.in,%.sql,$(wildcard sql/cat_tools--*--$(LINT_UPDATE_CUR).sql.in))
+LINT_UPDATE_OLD := $(patsubst sql/cat_tools--%--$(LINT_UPDATE_CUR).sql,sql/cat_tools--%.sql,$(LINT_UPDATE_UPD))
+lint--update-processed: $(EXTENSION__CURRENT_VERSION__FILES) $(LINT_UPDATE_OLD) $(LINT_UPDATE_UPD)
+	bin/lint--update --processed
+
+# Everything in bin/ that the rest of the suite leans on -- bin/test_existing
+# and bin/structural_diff drive the pgTAP runs, bin/lint--update drives
+# `lint--update` above -- so run this before anything that uses them: a broken
+# tool otherwise reports as a broken extension. prove takes the directory, so a
+# new bin/test/*.t needs no edit here. Test::Harness is core Perl; no setup.
+.PHONY: test-bin
+test-bin:
+	prove bin/test/
