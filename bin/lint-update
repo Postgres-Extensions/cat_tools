@@ -219,7 +219,7 @@ sub preprocess {
     $text =~ s{$re}{
         my $rest = $1;
         # DUPLICATED AT sql.mk (the sed that appends the tag): keep the tag text in sync.
-        my $ok = $processed ? $rest =~ m{\A[\w./-]+(?: VERSIONED FILE!)?\z}
+        my $ok = $processed ? $rest =~ m{\A[A-Za-z0-9_./-]+(?: VERSIONED FILE!)?\z}
                             : ($rest eq '' || $rest eq ' VERSIONED FILE!');
         if (!$ok) {
             my $ln = 1 + (substr($text, 0, $-[0]) =~ tr/\n//);
@@ -496,6 +496,7 @@ sub install_script {
 # 0.2.1--0.2.2 -- so the target version alone does not name a file. Exactly one
 # is still expected here: a development cycle has a single update script, and
 # two would mean the pair being checked is ambiguous.
+# DUPLICATED AT Makefile (the UPDATE_LINT_* derivation): keep in sync.
 sub current_pair {
     my $cur = current_version();
     # .sql.in first and only: a built tree also holds the .sql generated from

@@ -11,7 +11,7 @@
 
 use strict;
 use warnings;
-use Test::More tests => 48;
+use Test::More tests => 47;
 use File::Temp qw(tempdir);
 
 my $PROG = 'bin/lint-update';
@@ -295,7 +295,7 @@ for my $bad (
 # --- against the real tree --------------------------------------------------
 
 SKIP: {
-    skip 'run from the repo root', 7 unless -e 'sql/cat_tools--0.2.1.sql.in';
+    skip 'run from the repo root', 6 unless -e 'sql/cat_tools--0.2.1.sql.in';
 
     # No arguments at all: the pair every SQL-touching PR is judged on. It has
     # to be clean, or the CI step this drives is useless from the day it lands.
@@ -319,12 +319,4 @@ SKIP: {
     # ADP was already in force across this pair, so nothing predates it.
     $out = qx{$^X $PROG --versions 0.2.2 0.2.3 2>&1};
     unlike $out, qr/predates/, 'an ADP present in both installs raises nothing';
-
-    # The generated trio needs a prior build, so only run it when present.
-    SKIP: {
-        skip 'generated files not built (make update-lint-processed)', 1
-            unless -e 'sql/cat_tools--stable.sql' && -e 'sql/cat_tools--0.3.0--stable.sql';
-        qx{$^X $PROG --processed 2>&1};
-        is $? >> 8, 0, '--processed: the generated pair is clean';
-    }
 }

@@ -124,6 +124,7 @@ update-lint lint-update:
 # while the processed text depends on MAJORVER, so CI runs this per major in
 # the `test` job.
 .PHONY: update-lint-processed
+# DUPLICATED AT bin/lint-update current_pair(): keep the derivation in sync.
 UPDATE_LINT_CUR := $(patsubst sql/cat_tools--%.sql,%,$(EXTENSION__CURRENT_VERSION__FILES))
 UPDATE_LINT_UPD := $(patsubst %.sql.in,%.sql,$(wildcard sql/cat_tools--*--$(UPDATE_LINT_CUR).sql.in))
 UPDATE_LINT_OLD := $(patsubst sql/cat_tools--%--$(UPDATE_LINT_CUR).sql,sql/cat_tools--%.sql,$(UPDATE_LINT_UPD))

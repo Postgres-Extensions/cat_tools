@@ -338,7 +338,7 @@ jobs:
         # test/sql/relation__.sql.
         run: apt-get install -y rsync postgresql-server-dev-${{ matrix.pg }}
       - name: Check the generated update script covers the generated install script
-        # Per major because the generated text depends on it; the raw check in
+        # Per major because the generated text depends on the PostgreSQL major; the raw check in
         # `lint` runs once on the .sql.in sources.
         run: make update-lint-processed
       - name: Test on PostgreSQL ${{ matrix.pg }}
