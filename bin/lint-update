@@ -14,6 +14,7 @@
 #   bin/lint-update                        # the current cycle
 #   bin/lint-update --versions OLD NEW     # any other pair
 #   bin/lint-update OLD NEW UPDATE         # explicit paths
+#   bin/lint-update --processed [...]      # the generated .sql files, not .sql.in
 #   Options: --sql-dir DIR (default "sql"), --ext NAME (default "cat_tools").
 #   Exit: 0 clean, 1 findings, 2 usage error.
 #
@@ -35,7 +36,9 @@
 #   1a. Before splitting, delete every `@generated@` marker (sql.mk's
 #      do-not-edit tag) through end of line, so its ` VERSIONED FILE!` variant
 #      in released copies compares equal. Any other text after a marker is an
-#      error (exit 2).
+#      error (exit 2). With --processed the marker is sql.mk's expansion,
+#      `-- GENERATED FILE! DO NOT EDIT! See <source path>[ VERSIONED FILE!]`,
+#      deleted and guarded the same way; the path differs per file.
 #   2. Normalize each statement: collapse whitespace. An unquoted comment
 #      inside a statement is kept (update-script copies are expected to be
 #      verbatim); a comment between statements is dropped.
@@ -55,6 +58,17 @@
 #
 # The interesting content is therefore not the matcher. It is the short list of
 # cases where a copy is impossible, below, plus the escape hatch for the rest.
+#
+# TWO MODES
+#
+#   Raw (default) compares the pre-SED .sql.in text, with both branches of any
+#   `-- SED:` line live. It needs no build and no PostgreSQL, so it runs in the
+#   `lint` job. --processed compares what sql.mk generated for ONE PostgreSQL
+#   major (the text that actually installs); `make update-lint-processed`
+#   builds those files first and CI runs it in every `test` leg. With no paths
+#   it derives sql/<ext>--<last-released>.sql, sql/<ext>--<default_version>.sql
+#   and sql/<ext>--<last-released>--<default_version>.sql. No SED is resolved
+#   here: the generated files already went through sql.mk's own.
 #
 # ENUM LABELS -- out of scope, checked properly elsewhere
 #
@@ -180,6 +194,7 @@ my $PROG = 'bin/lint-update';
 
 # Set from @ARGV below, but declared here so the subs close over them.
 my ($sql_dir, $ext) = ('sql', 'cat_tools');
+my $processed = 0;    # --processed: inputs are sql.mk's generated .sql files
 
 sub usage_error { print STDERR "$PROG: $_[0]\n"; exit 2 }
 
@@ -196,13 +211,21 @@ sub abbrev { my $s = shift; length($s) > 140 ? substr($s, 0, 137) . '...' : $s }
 # would swallow, so it is an error.
 sub preprocess {
     my ($text, $path) = @_;
-    $text =~ s{\@generated\@([^\n]*)}{
+    my $re = $processed
+        # DUPLICATED AT sql.mk (both "-- GENERATED FILE! DO NOT EDIT! See $<" recipes).
+        ? qr{-- GENERATED FILE! DO NOT EDIT! See ([^\n]*)}
+        : qr{\@generated\@([^\n]*)};
+    my $what = $processed ? 'the GENERATED FILE marker' : '@generated@';
+    $text =~ s{$re}{
         my $rest = $1;
         # DUPLICATED AT sql.mk (the sed that appends the tag): keep the tag text in sync.
-        if ($rest ne '' && $rest ne ' VERSIONED FILE!') {
+        my $ok = $processed ? $rest =~ m{\A[\w./-]+(?: VERSIONED FILE!)?\z}
+                            : ($rest eq '' || $rest eq ' VERSIONED FILE!');
+        if (!$ok) {
             my $ln = 1 + (substr($text, 0, $-[0]) =~ tr/\n//);
-            usage_error("$path:$ln: text after \@generated\@ other than "
-                . "' VERSIONED FILE!' cannot be analyzed");
+            usage_error("$path:$ln: text after $what other than "
+                . ($processed ? "'<source path>[ VERSIONED FILE!]'" : "' VERSIONED FILE!'")
+                . " cannot be analyzed");
         }
         '';
     }ge;
@@ -494,6 +517,7 @@ while (@ARGV) {
     my $a = shift @ARGV;
     if    ($a eq '--sql-dir')  { $sql_dir = shift @ARGV // usage_error('--sql-dir needs a value') }
     elsif ($a eq '--ext')      { $ext     = shift @ARGV // usage_error('--ext needs a value') }
+    elsif ($a eq '--processed') { $processed = 1 }
     elsif ($a eq '--versions') { @versions = splice @ARGV, 0, 2 }
     elsif ($a =~ /\A-/)        { usage_error("unknown option $a") }
     else                       { push @paths, $a }
@@ -505,7 +529,11 @@ if (@versions) {
     usage_error('--versions needs OLD and NEW') unless @versions == 2;
     usage_error('--versions and positional paths are exclusive') if @paths;
     my ($o, $n) = @versions;
-    @paths = (
+    @paths = $processed ? (
+        first_existing("$sql_dir/$ext--$o.sql"),
+        first_existing("$sql_dir/$ext--$n.sql"),
+        first_existing("$sql_dir/$ext--$o--$n.sql"),
+    ) : (
         install_script($o),
         install_script($n),
         first_existing("$sql_dir/$ext--$o--$n.sql.in", "$sql_dir/$ext--$o--$n.sql"),

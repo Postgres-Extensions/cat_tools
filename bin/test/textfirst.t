@@ -11,7 +11,7 @@
 
 use strict;
 use warnings;
-use Test::More tests => 42;
+use Test::More tests => 48;
 use File::Temp qw(tempdir);
 
 my $PROG = 'bin/lint-update';
@@ -28,7 +28,7 @@ sub run_trio {
         close $fh;
         push @p, $p;
     }
-    my $out = qx{$^X $PROG @p 2>&1};
+    my $out = qx{$^X $PROG @{$f{flags} // []} @p 2>&1};
     return ($? >> 8, $out);
 }
 
@@ -267,10 +267,35 @@ for my $bad (
     like $out, qr/unrecognized ALTER DEFAULT PRIVILEGES form/, '... saying so, not skipping it';
 }
 
+# --- --processed: the GENERATED FILE marker --------------------------------
+
+{
+    my $body = "CREATE FUNCTION f() RETURNS int LANGUAGE sql AS \$b\$\n  SELECT 1; -- GENERATED FILE! DO NOT EDIT! See sql/%s.sql.in%s\n\$b\$;\n";
+    my %t = (
+        old    => sprintf($body, 'cat_tools--0.3.0', ' VERSIONED FILE!'),
+        new    => sprintf($body, 'cat_tools', ''),
+        update => '',
+    );
+    my ($rc) = run_trio(%t, flags => ['--processed']);
+    is $rc, 0, '--processed: GENERATED FILE marker, with and without VERSIONED FILE!, differs by path yet compares equal (dollar-quoted)';
+
+    ($rc) = run_trio(%t);
+    is $rc, 1, 'default mode does not apply the GENERATED normalization';
+
+    my $bad = "SELECT 1; -- GENERATED FILE! DO NOT EDIT! See sql/x.sql.in */ SELECT 2;\n";
+    my $out;
+    ($rc, $out) = run_trio(old => $bad, new => $bad, update => '', flags => ['--processed']);
+    is $rc, 2, '--processed: text after the marker other than the tag is an error';
+    like $out, qr/:1: text after the GENERATED FILE marker/, '... naming the line';
+
+    ($rc) = run_trio(old => "SELECT 1; -- \@generated\@ junk\n", new => "SELECT 1;\n", update => '', flags => ['--processed']);
+    is $rc, 0, '--processed does not treat @generated@ as a marker';
+}
+
 # --- against the real tree --------------------------------------------------
 
 SKIP: {
-    skip 'run from the repo root', 6 unless -e 'sql/cat_tools--0.2.1.sql.in';
+    skip 'run from the repo root', 7 unless -e 'sql/cat_tools--0.2.1.sql.in';
 
     # No arguments at all: the pair every SQL-touching PR is judged on. It has
     # to be clean, or the CI step this drives is useless from the day it lands.
@@ -294,4 +319,12 @@ SKIP: {
     # ADP was already in force across this pair, so nothing predates it.
     $out = qx{$^X $PROG --versions 0.2.2 0.2.3 2>&1};
     unlike $out, qr/predates/, 'an ADP present in both installs raises nothing';
+
+    # The generated trio needs a prior build, so only run it when present.
+    SKIP: {
+        skip 'generated files not built (make update-lint-processed)', 1
+            unless -e 'sql/cat_tools--stable.sql' && -e 'sql/cat_tools--0.3.0--stable.sql';
+        qx{$^X $PROG --processed 2>&1};
+        is $? >> 8, 0, '--processed: the generated pair is clean';
+    }
 }
