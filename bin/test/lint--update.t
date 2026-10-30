@@ -328,10 +328,11 @@ SKIP: {
 
     # No arguments at all: the pair every SQL-touching PR is judged on. It has
     # to be clean, or the CI step this drives is useless from the day it lands.
+    my ($v) = do { local (@ARGV, $/) = 'cat_tools.control'; <> } =~ /^\s*default_version\s*=\s*'([^']+)'/m;
     my $out = qx{$^X $PROG 2>&1};
     is $? >> 8, 0, 'the current development pair is clean';
     like $out, qr{new sql/cat_tools\.sql\.in\b}, '... comparing against the base install script';
-    like $out, qr{update sql/cat_tools--\S+--stable\.sql\.in}, '... via this cycle\'s update script';
+    like $out, qr{update sql/cat_tools--\S+--\Q$v\E\.sql\.in}, '... via this cycle\'s update script';
 
     # One @generated@ marker sits inside a dollar-quoted function body, and a
     # released copy carries extra text after it. The pair above is only clean
