@@ -530,11 +530,11 @@ if (@versions) {
     usage_error('--versions needs OLD and NEW') unless @versions == 2;
     usage_error('--versions and positional paths are exclusive') if @paths;
     my ($o, $n) = @versions;
-    @paths = $processed ? (
-        first_existing("$sql_dir/$ext--$o.sql"),
-        first_existing("$sql_dir/$ext--$n.sql"),
-        first_existing("$sql_dir/$ext--$o--$n.sql"),
-    ) : (
+    # No /dev/null fallback here: a missing generated file would pass on nothing.
+    @paths = $processed ? (map {
+        -e $_ or usage_error("$_ does not exist; run `make update-lint-processed` to generate it");
+        $_;
+    } "$sql_dir/$ext--$o.sql", "$sql_dir/$ext--$n.sql", "$sql_dir/$ext--$o--$n.sql") : (
         install_script($o),
         install_script($n),
         first_existing("$sql_dir/$ext--$o--$n.sql.in", "$sql_dir/$ext--$o--$n.sql"),
@@ -602,6 +602,8 @@ push @fail, "$paths[2]: stale waiver /$_->{src}/ matches nothing -- $_->{why}"
 
 printf "%s\n  old %s (%d statements)\n  new %s (%d statements)\n  update %s\n",
     $PROG, $paths[0], scalar @old, $paths[1], scalar @new, $paths[2];
+print "  processed mode: these files are generated from .sql.in; fix the .sql.in, "
+    . "reproduce with `make update-lint-processed`\n" if $processed;
 printf "  added %d (matched %d, scaffolding %d, enum %d, unmatched %d)\n",
     scalar @added, $matched, $scaffolding, $enum,
     scalar @added - $matched - $scaffolding - $enum;

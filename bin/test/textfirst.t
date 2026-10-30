@@ -11,7 +11,7 @@
 
 use strict;
 use warnings;
-use Test::More tests => 47;
+use Test::More tests => 52;
 use File::Temp qw(tempdir);
 
 my $PROG = 'bin/lint-update';
@@ -290,6 +290,28 @@ for my $bad (
 
     ($rc) = run_trio(old => "SELECT 1; -- \@generated\@ junk\n", new => "SELECT 1;\n", update => '', flags => ['--processed']);
     is $rc, 0, '--processed does not treat @generated@ as a marker';
+}
+
+# --- --processed: missing generated files, and the mode hint ----------------
+
+{
+    my $sd  = tempdir(CLEANUP => 1);
+    my $cmd = "$^X $PROG --processed --sql-dir $sd --versions 1.0 2.0 2>&1";
+    my $out = qx{$cmd};
+    is $? >> 8, 2, '--processed with a missing derived file is a usage error, not a pass on /dev/null';
+    like $out, qr/make update-lint-processed/, '... telling the user how to generate it';
+
+    for my $f ("cat_tools--1.0.sql", "cat_tools--2.0.sql", "cat_tools--1.0--2.0.sql") {
+        open my $fh, '>', "$sd/$f" or die $!;
+        close $fh;
+    }
+    $out = qx{$cmd};
+    is $? >> 8, 0, '--processed over the three (empty) derived files runs';
+    like $out, qr/^  processed mode: .*fix the \.sql\.in.*make update-lint-processed/m,
+        '... and prints the processed-mode hint';
+
+    $out = qx{$^X $PROG --sql-dir $sd --versions 1.0 2.0 2>&1};
+    unlike $out, qr/processed mode/, 'raw mode prints no processed-mode hint';
 }
 
 # --- against the real tree --------------------------------------------------
